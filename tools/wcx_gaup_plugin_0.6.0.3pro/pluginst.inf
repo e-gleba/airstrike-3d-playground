@@ -1,0 +1,6 @@
+[PluginInstall]
+Description=Game Archive UnPacker Version 0.6.0.3 PRO
+Type=wcx
+File=gaup_pro.wcx
+DefaultExtension=gaup
+DefaultDir=GAUP_PRO
