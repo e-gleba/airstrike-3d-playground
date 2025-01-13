@@ -1,5 +1,13 @@
 # airstrike-re
 
+<div align="center">
+   
+![image](https://github.com/user-attachments/assets/770024d0-cebb-4497-b0af-4ee7d84ffeff)
+
+![image](https://github.com/user-attachments/assets/8a3a1a78-8d3a-4f00-ab3d-cdb11c06cab4)
+</div>
+
+
 My nostalgic journey into reverse engineering Airstrike 3D - the first PC game that captured my imagination as a kid. This repository contains tools and research for understanding the game's internals.
 
 ## Overview
