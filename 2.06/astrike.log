@@ -12,7 +12,7 @@ F_Init:
 ...CDS: succeeded.
 ...registered window class.
 ...CDS: succeeded.
-Window changed: 1418592 60...window creation: succeeded.
+Window changed: 17367115 34144327...window creation: succeeded.
 ...getting DC: succeeded.
 ...using pixel format 217: color(24-bit), Z-buffer(24-bit), stencil(0-bit))
 ...no PFD_GENERIC_ACCELERATED 
@@ -38,13 +38,21 @@ Joy_Init: No valid joysticks (a5)
 
 G_LoadObjects: 1533 objects parsed succefully.
 
-File 'menu\controlsh_1.tga' not found.
-File 'menu\controlsh_0.tga' not found.
-File 'menu\controlsh_2.tga' not found.
-File 'menu\controlsh_1.tga' not found.
-File 'menu\controlsh_0.tga' not found.
-File 'menu\controlsh_2.tga' not found.
-File 'menu\controlsh_1.tga' not found.
+...CDS: succeeded.
+Window changed: 1280 960...CDS: succeeded.
+Window changed: 1280 960...CDS: succeeded.
+Window changed: 1280 960...CDS: succeeded.
+Window changed: 1280 960...CDS: succeeded.
+Window changed: 1280 960...CDS: succeeded.
+Window changed: 1280 960...CDS: succeeded.
+Window changed: 1280 960...CDS: succeeded.
+Window changed: 1280 960...CDS: succeeded.
+Window changed: 1280 960...CDS: succeeded.
+Window changed: 1280 960...CDS: succeeded.
+Window changed: 1280 960...CDS: succeeded.
+Window changed: 1280 960...CDS: succeeded.
+Window changed: 1280 960...CDS: succeeded.
+Window changed: 1280 960File 'menu\controlsh_1.tga' not found.
 File 'menu\controlsh_0.tga' not found.
 File 'menu\controlsh_2.tga' not found.
 Shutting down sound system.
