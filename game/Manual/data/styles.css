@@ -1,0 +1,8 @@
+.text {  font-family: Tahoma, Verdana, Arial; font-size: 14px; color: #FFFFFF}
+.header {  font-family: Verdana, Arial, Helvetica, sans-serif; font-size: 16px; font-weight: bold; color: #CE0000}
+.header2 {  font-family: Verdana, Arial, Helvetica, sans-serif; font-size: 14px; font-weight: bold; color: #CE0000}
+a {  font-family: Verdana, Arial, Helvetica, sans-serif; font-size: 13px; text-decoration: none; color: #CC6000}
+a:hover {  font-family: Verdana, Arial, Helvetica, sans-serif; font-size: 13px; color: #CC0000}
+
+.a2 {  font-family: Verdana, Arial, Helvetica, sans-serif; text-decoration: none; font-size: 14px; font-weight: bold; color: #CC8000}
+.a2:hover {  font-family: Verdana, Arial, Helvetica, sans-serif; font-weight: bold; font-size: 14px; color: #CC0000}
