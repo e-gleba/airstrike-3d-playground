@@ -1,5 +1,7 @@
 # airstrike-re
 
+https://www.pcgamingwiki.com/wiki/AirStrike_2
+
 <div align="center">
    
 ![image](https://github.com/user-attachments/assets/770024d0-cebb-4497-b0af-4ee7d84ffeff)
