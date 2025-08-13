@@ -10,6 +10,13 @@ openmpt123 --render file.mo3 --output file.wav
 ```
 
 tacentview is recommended for tga view <https://github.com/bluescan/tacentview>
+
+linux run steam fedora amd gpu:
+
+```
+MESA_EXTENSION_MAX_YEAR=2003 %command%
+```
+
 <div align="center">
 
 ![image](https://github.com/user-attachments/assets/770024d0-cebb-4497-b0af-4ee7d84ffeff)
