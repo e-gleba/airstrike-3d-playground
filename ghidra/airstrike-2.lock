@@ -1,9 +1,0 @@
-#Ghidra Lock File
-#Mon Aug 18 22:21:52 MSK 2025
-<META>\ Supports\ File\ Channel\ Locking=Channel Lock
-Hostname=fedora
-OS\ Architecture=amd64
-OS\ Name=Linux
-OS\ Version=6.15.9-201.fc42.x86_64
-Timestamp=8/18/25, 10\:21\u202FPM
-Username=egleba
