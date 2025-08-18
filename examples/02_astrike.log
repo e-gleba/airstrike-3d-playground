@@ -1,0 +1,58 @@
+
+---- Initializing file system ----
+
+  pak0.apk - 1609 files
+  pak1.apk - 705 files
+  pak2.apk - 45 files
+F_Init: 
+3 data files found.
+
+---- Initializing main window ----
+
+...CDS: succeeded.
+...registered window class.
+...CDS: succeeded.
+Window changed: 17367115 34144327...window creation: succeeded.
+...getting DC: succeeded.
+...using pixel format 217: color(24-bit), Z-buffer(24-bit), stencil(0-bit))
+...no PFD_GENERIC_ACCELERATED 
+...no PFD_GENERIC_FORMAT 
+...creating RC: succeeded.
+
+------ OpenGL Initializing ------
+
+  renderer   : AMD Radeon Graphics (radeonsi, rembrandt, LLVM 19.1.7, DRM 3.63, 6.15.9-201.fc42.x86_64)
+  vendor     : AMD
+  version    : 4.6 (Compatibility Profile) Mesa 25.1.7 (git-581a4f7e70)
+  extensions : GL_ARB_multisample GL_EXT_abgr GL_EXT_bgra GL_EXT_blend_color GL_EXT_blend_minmax GL_EXT_blend_subtract GL_EXT_copy_texture GL_EXT_subtexture GL_EXT_texture_object GL_EXT_vertex_array GL_EXT_compiled_vertex_array GL_EXT_texture GL_EXT_texture3D GL_IBM_rasterpos_clip GL_ARB_point_parameters GL_EXT_draw_range_elements GL_EXT_packed_pixels GL_EXT_point_parameters GL_EXT_rescale_normal GL_EXT_separate_specular_color GL_EXT_texture_edge_clamp GL_SGIS_generate_mipmap GL_SGIS_texture_border_clamp GL_SGIS_texture_edge_clamp GL_SGIS_texture_lod GL_ARB_framebuffer_sRGB GL_ARB_multitexture GL_EXT_framebuffer_sRGB GL_IBM_multimode_draw_arrays GL_IBM_texture_mirrored_repeat GL_ARB_texture_cube_map GL_ARB_texture_env_add GL_ARB_transpose_matrix GL_EXT_blend_func_separate GL_EXT_fog_coord GL_EXT_multi_draw_arrays GL_EXT_secondary_color GL_EXT_texture_env_add GL_EXT_texture_filter_anisotropic GL_EXT_texture_lod_bias GL_INGR_blend_func_separate GL_NV_blend_square GL_NV_light_max_exponent GL_NV_texgen_reflection GL_NV_texture_env_combine4 GL_S3_s3tc GL_SUN_multi_draw_arrays GL_ARB_texture_border_clamp GL_ARB_texture_compression GL_EXT_framebuffer_object GL_EXT_texture_compression_s3tc GL_EXT_texture_env_combine GL_EXT_texture_env_dot3 GL_MESA_window_pos GL_NV_packed_depth_stencil GL_NV_texture_rectangle GL_ARB_depth_texture GL_ARB_occlusion_query GL_ARB_shadow GL_ARB_texture_env_combine GL_ARB_texture_env_crossbar GL_ARB_texture_env_dot3 GL_ARB_texture_mirrored_repeat GL_ARB_window_pos GL_ATI_fragment_shader GL_EXT_stencil_two_side GL_EXT_texture_cube_map GL_NV_copy_depth_to_color GL_NV_depth_clamp GL_NV_fog_distance GL_NV_half_float GL_APPLE_packed_pixels GL_ARB_draw_buffers GL_ARB_fragment_program GL_ARB_fragment_shader GL_ARB_shader_objects GL_ARB_vertex_program GL_ARB_vertex_shader GL_ATI_draw_buffers GL_ATI_texture_env_combine3 GL_ATI_texture_float GL_EXT_depth_bounds_test GL_EXT_shadow_funcs GL_EXT_stencil_wrap GL_MESA_pack_invert GL_NV_primitive_restart GL_ARB_depth_clamp GL_ARB_fragment_program_shadow GL_ARB_half_float_pixel GL_ARB_occlusion_query2 GL_ARB_point_sprite GL_ARB_shading_language_100 GL_ARB_sync GL_ARB_texture_non_power_of_two GL_ARB_vertex_buffer_object GL_ATI_blend_equation_separate GL_EXT_blend_equation_separate GL_OES_read_format WGL_EXT_extensions_string WGL_EXT_swap_control 
+
+  multitexture    : enabled
+  vertex arrays   : enabled
+  texture env add : enabled
+  texture combine : enabled
+
+Joy_Init: No valid joysticks (a5)
+
+---- Initializing sound system ----
+  BASS_Init: Succeeded.
+
+G_LoadObjects: 1533 objects parsed succefully.
+
+...CDS: succeeded.
+Window changed: 1280 960...CDS: succeeded.
+Window changed: 1280 960...CDS: succeeded.
+Window changed: 1280 960...CDS: succeeded.
+Window changed: 1280 960...CDS: succeeded.
+Window changed: 1280 960...CDS: succeeded.
+Window changed: 1280 960...CDS: succeeded.
+Window changed: 1280 960...CDS: succeeded.
+Window changed: 1280 960...CDS: succeeded.
+Window changed: 1280 960...CDS: succeeded.
+Window changed: 1280 960...CDS: succeeded.
+Window changed: 1280 960...CDS: succeeded.
+Window changed: 1280 960...CDS: succeeded.
+Window changed: 1280 960...CDS: succeeded.
+Window changed: 1280 960File 'menu\controlsh_1.tga' not found.
+File 'menu\controlsh_0.tga' not found.
+File 'menu\controlsh_2.tga' not found.
+Shutting down sound system.

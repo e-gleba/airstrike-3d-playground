@@ -18,7 +18,7 @@ start "" "release\x32\x32dbg.exe"
 call :check_start "x32dbg"
 
 echo [launch] starting target...
-start "" "AirStrike3D II.exe" %*
+start "" "as3d2.exe" %*
 call :check_start "airstrike3d"
 
 echo [launch] all processes launched successfully
