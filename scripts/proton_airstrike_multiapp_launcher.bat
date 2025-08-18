@@ -1,6 +1,10 @@
 @echo off
 setlocal enabledelayedexpansion
 
+REM Add this .bat file as external game in Steam:
+REM Steam -> Add a Game -> Add a Non-Steam Game -> Browse to this .bat file
+REM Set launch options if needed and run through Proton
+
 echo [launch] proton multi-app launcher
 echo [launch] starting tools...
 
