@@ -1,4 +1,0 @@
-LIBRARY masm_plugin
-EXPORTS
-LoadDll
-DoMyJob
