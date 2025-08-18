@@ -59,6 +59,9 @@ Add this to the game's launch options in Steam.
 3. Browse extracted files in the created directory
 4. Convert audio files as needed
 
+## Ghidra project
+as project uses asprotect ive decided on linux usin simple debugger just walk until get somekind of loop. The game seems to be unpack itself creating some thread, so even the debugger deataches at some moment in ntdll magic, so we need just to pause at any moment and get the address of the desired function. The next stem is usin xbg with dumpex pluging dump with the addres of main loop function. And thats all, the game weights 31.2 mbs, in ghidra project ive marked some of the interesting places like loading models, working with saves, so u will need just to clone and open with ghidra the project and explore yourself! Maybe some time someone will rever it xD
+
 ## ⚖️ Legal
 
 Educational and preservation purposes only. Respect original copyrights.
