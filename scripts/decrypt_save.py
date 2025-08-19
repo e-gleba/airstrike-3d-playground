@@ -18,6 +18,17 @@ def xor_crypt(data, key):
     
     return bytes(result)
 
+def generate_null_key():
+    """generate null key (all zeros) that doesn't affect data"""
+    return b'\x00' * 0x100
+
+def generate_header(key):
+    """generate file header with key"""
+    # file header is 4 bytes (0x3f800000 from save function) + key + padding
+    file_header = struct.pack('<I', 0x3f800000)
+    padding = b'\x00' * (0x108 - 4 - 0x100)  # remaining header space
+    return file_header + key + padding
+
 def extract_key(file_path):
     """extract xor key from save file"""
     try:
@@ -105,13 +116,17 @@ def dump_decrypted(file_path, output_path):
         print(f"error: {e}", file=sys.stderr)
         return False
 
-def encrypt_save(template_path, data_path, output_path):
-    """encrypt data using key from template save file"""
+def encrypt_save(template_path, data_path, output_path, generate_key=False):
+    """encrypt data using key from template save file or generate new key"""
     try:
-        key = extract_key(template_path)
-        if not key:
-            print(f"error: failed to extract key from {template_path}", file=sys.stderr)
-            return False
+        if generate_key:
+            key = generate_null_key()
+            print("generated null key (data will remain unchanged)")
+        else:
+            key = extract_key(template_path)
+            if not key:
+                print(f"error: failed to extract key from {template_path}", file=sys.stderr)
+                return False
         
         with open(data_path, 'rb') as f:
             data = f.read()
@@ -119,14 +134,19 @@ def encrypt_save(template_path, data_path, output_path):
         # pad or truncate to 0x574 bytes
         if len(data) > 0x574:
             data = data[:0x574]
+            print(f"warning: data truncated to {0x574} bytes")
         elif len(data) < 0x574:
             data += b'\x00' * (0x574 - len(data))
+            print(f"data padded to {0x574} bytes")
         
         encrypted = xor_crypt(data, key)
         
-        # read original header
-        with open(template_path, 'rb') as f:
-            header = f.read(0x108)
+        # generate or read header
+        if generate_key:
+            header = generate_header(key)
+        else:
+            with open(template_path, 'rb') as f:
+                header = f.read(0x108)
         
         with open(output_path, 'wb') as f:
             f.write(header)
@@ -182,6 +202,10 @@ def info_save(file_path):
                 key = header[4:4+0x100]
                 decrypted = xor_crypt(data, key)
                 
+                # check if key is null (all zeros)
+                is_null_key = all(b == 0 for b in key)
+                print(f"null key (no encryption): {is_null_key}")
+                
                 # try to identify content type
                 printable_ratio = sum(32 <= b <= 126 for b in decrypted) / len(decrypted)
                 null_ratio = decrypted.count(0) / len(decrypted)
@@ -223,9 +247,11 @@ def main():
     
     # encrypt command
     encrypt_parser = subparsers.add_parser('encrypt', help='encrypt data to save file')
-    encrypt_parser.add_argument('template', help='template save file (for key)')
     encrypt_parser.add_argument('data', help='input data file')
     encrypt_parser.add_argument('output', help='output save file')
+    encrypt_parser.add_argument('-t', '--template', help='template save file (for key)')
+    encrypt_parser.add_argument('-g', '--generate-key', action='store_true',
+                              help='generate null key (data unchanged)')
     
     # key command
     key_parser = subparsers.add_parser('key', help='extract xor key')
@@ -250,7 +276,13 @@ def main():
     elif args.command == 'dump':
         success = dump_decrypted(args.input, args.output)
     elif args.command == 'encrypt':
-        success = encrypt_save(args.template, args.data, args.output)
+        if not args.generate_key and not args.template:
+            print("error: must specify either --template or --generate-key", file=sys.stderr)
+            return 1
+        if args.generate_key and args.template:
+            print("error: cannot use both --template and --generate-key", file=sys.stderr)
+            return 1
+        success = encrypt_save(args.template, args.data, args.output, args.generate_key)
     elif args.command == 'key':
         success = dump_key(args.input, args.output, args.format)
     elif args.command == 'info':
