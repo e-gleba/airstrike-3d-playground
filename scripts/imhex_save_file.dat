@@ -1,0 +1,10 @@
+#pragma author divo-decrypt
+#pragma description Divo game save file format parser
+#pragma endian little
+struct DivoSaveFile {
+    u16 file_magic [[color("4A90E2"), comment("File magic (0x3f800000)")]];
+    u8 xor_key[0x104] [[color("50C878"), comment("XOR encryption key (256 bytes)")]];
+    u16 pad_bytes [[color("808080"), comment("Header padding (4 bytes)")]];
+    u8 encrypted_data[0x574] [[color("FF6B35"), comment("Encrypted save data (1396 bytes)")]];
+};
+DivoSaveFile save_file @ 0x00;
