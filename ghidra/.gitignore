@@ -10,7 +10,6 @@ project.lock*
 
 # Auto-generated analysis data
 *.gzf
-*.rep
 analyzeHeadless.log*
 
 # Version control files (Ghidra's internal)
