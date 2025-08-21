@@ -13,5 +13,5 @@ project.lock*
 analyzeHeadless.log*
 
 # Version control files (Ghidra's internal)
-*.versions/
-versions/
+*.versioned/
+versioned/
