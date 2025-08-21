@@ -1,0 +1,18 @@
+# Lock files (prevent concurrent access conflicts)
+*.lock
+*.ulock
+project.lock*
+
+# Temporary analysis files
+*.tmp
+*.temp
+*.cache
+
+# Auto-generated analysis data
+*.gzf
+*.rep
+analyzeHeadless.log*
+
+# Version control files (Ghidra's internal)
+*.versions/
+versions/
