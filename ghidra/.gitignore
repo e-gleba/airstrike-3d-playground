@@ -15,3 +15,5 @@ analyzeHeadless.log*
 # Version control files (Ghidra's internal)
 *.versioned/
 versioned/
+
+projectState
