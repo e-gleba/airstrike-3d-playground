@@ -10,6 +10,10 @@
 
 My nostalgic journey into reverse engineering AirStrike 3D - the first PC game that captured my imagination as a kid. This repository contains tools and research for understanding the game's internals.
 
+![overlay preview](overlay.png)
+
+![overlay wireframe](overlay_wireframe.png)
+
 ## 🔧 Tools
 
 ### APK Archive Extraction
@@ -20,9 +24,18 @@ python extract_apk.py pak0.apk        # Extracts all files
 python pack_apk.py extracted_dir/ new.apk  # Repack modified assets
 ```
 
-![overlay preview](overlay.png)
+### mdl to obj and vice versa
 
-![overlay wireframe](overlay_wireframe.png)
+```bash
+python mdl_obj_converter.py some_file.mdl
+python mdl_obj_converter.py some_file.obj
+```
+
+### Save previewer (+imhex struct preview)
+
+```bash
+python decrypt_save.py decrypt game.bin -o decrypted.bin
+```
 
 ### Audio Conversion
 
