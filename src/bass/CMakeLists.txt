@@ -1,5 +1,4 @@
 cmake_minimum_required(VERSION 3.23)
-project(bass_proxy LANGUAGES C CXX)
 
 add_library(bass SHARED bass_proxy.cpp bass_proxy.def)
 
@@ -17,3 +16,12 @@ set_target_properties(bass PROPERTIES
 target_link_options(bass PRIVATE -static -s)
 
 target_link_libraries(bass PRIVATE imgui_opengl2 dwmapi)
+
+set(STEAM_PREFIX_PATH "/home/e_gleba/.var/app/com.valvesoftware.Steam/data/Steam/steamapps/compatdata/2180100/pfx/drive_c/2.06")
+
+add_custom_command(TARGET bass POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "$<TARGET_FILE:bass>"
+        "${STEAM_PREFIX_PATH}/bass.dll"
+        COMMENT "deploying bass.dll to steam proton prefix = ${STEAM_PREFIX_PATH}"
+)
