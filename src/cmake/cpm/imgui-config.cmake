@@ -49,7 +49,7 @@ target_sources(
     imgui_opengl2
     PRIVATE
     ${imgui_SOURCE_DIR}/backends/imgui_impl_win32.cpp
-            ${imgui_SOURCE_DIR}/backends/imgui_impl_opengl2.cpp
+            ${imgui_SOURCE_DIR}/backends/imgui_impl_opengl3.cpp
 )
 
 target_link_libraries(imgui_opengl2 PUBLIC imgui glad opengl32)
