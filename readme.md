@@ -20,6 +20,10 @@ python extract_apk.py pak0.apk        # Extracts all files
 python pack_apk.py extracted_dir/ new.apk  # Repack modified assets
 ```
 
+![overlay preview](overlay.png)
+
+![overlay wireframe](overlay_wireframe.png)
+
 ### Audio Conversion
 
 ```bash
