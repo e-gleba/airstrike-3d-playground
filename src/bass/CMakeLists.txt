@@ -1,11 +1,17 @@
-cmake_minimum_required(VERSION 3.16)
-project(bass_proxy LANGUAGES C)
+cmake_minimum_required(VERSION 3.23)
+project(bass_proxy LANGUAGES C CXX)
 
-# Build a 32-bit proxy DLL
-add_library(bass SHARED bass_proxy.c bass_proxy.def)
+add_library(bass SHARED bass_proxy.cpp bass_proxy.def)
 
-# produce “bass.dll” with no lib prefix
-set_target_properties(bass PROPERTIES OUTPUT_NAME "bass" PREFIX "")
+set_target_properties(bass PROPERTIES
+    CXX_STANDARD 23
+    CXX_STANDARD_REQUIRED ON
+    CXX_EXTENSIONS OFF
+    POSITION_INDEPENDENT_CODE ON
+    OUTPUT_NAME "bass"   # produce bass.dll
+    PREFIX ""            # no "lib" prefix
+    WINDOWS_EXPORT_ALL_SYMBOLS OFF  # we rely on .def
+)
 
 # static link so we ship no extra MinGW runtimes
 target_link_options(bass PRIVATE -static -s)
