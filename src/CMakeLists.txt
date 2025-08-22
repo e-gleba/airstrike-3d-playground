@@ -5,22 +5,19 @@ project(
     VERSION 1.0.0
     DESCRIPTION "My awesome C/C++ project!"
     HOMEPAGE_URL "https://github.com/geugenm/template-cpp-project"
-    LANGUAGES C CXX
-)
+    LANGUAGES C CXX)
 
 list(
     APPEND
     CMAKE_PREFIX_PATH
     ${CMAKE_CURRENT_LIST_DIR}/cmake
-    ${CMAKE_CURRENT_LIST_DIR}/cmake/utils
-)
+    ${CMAKE_CURRENT_LIST_DIR}/cmake/utils)
 
 list(
     APPEND
     CMAKE_FIND_ROOT_PATH
     ${CMAKE_CURRENT_LIST_DIR}/cmake
-    ${CMAKE_CURRENT_LIST_DIR}/cmake/utils
-)
+    ${CMAKE_CURRENT_LIST_DIR}/cmake/utils)
 
 message(STATUS "CMAKE_PREFIX_PATH: ${CMAKE_PREFIX_PATH}")
 
