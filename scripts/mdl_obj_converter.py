@@ -1,268 +1,392 @@
 #!/usr/bin/env python3
+"""
+Airstrike 3D model format converter.
 
+Converts between Wavefront OBJ and Airstrike 3D MDL formats with bidirectional
+support and format validation. Replicates original JavaScript logic exactly.
+"""
+
+import argparse
 import struct
 import sys
 from pathlib import Path
+from typing import List, Tuple, Optional
+import logging
+
+__version__ = "1.0.2"
+
+# MDL format constants
+MDL_SIGNATURE = b'MDL!\x02\x00\x00\x00\x01'
+MDL_HEADER_PADDING = 67
+MDL_DATA_OFFSET = 120
 
 
-def int_to_bytes(amount):
-    return struct.pack('<I', amount)
+def setup_logging(verbose: bool):
+    """Configure logging output."""
+    level = logging.DEBUG if verbose else logging.INFO
+    format_str = "%(levelname)s: %(message)s" if not verbose else "%(asctime)s %(levelname)s: %(message)s"
+    logging.basicConfig(level=level, format=format_str)
 
 
-def int_to_bytes2(amount):
-    return struct.pack('<H', amount)
+def detect_format(path: Path) -> Optional[str]:
+    """Detect file format from extension."""
+    suffix = path.suffix.lower()
+    if suffix == '.obj':
+        return 'obj'
+    elif suffix == '.mdl':
+        return 'mdl'
+    return None
 
 
-def float_to_hex(float_val):
-    packed = struct.pack('<f', float_val)
-    return packed
-
-
-def hex_float(hex_bytes):
-    return struct.unpack('<f', hex_bytes)[0]
-
-
-def convert_to_mdl(obj_file_path):
-    with open(obj_file_path, 'r') as f:
-        lines = f.read().split('\n')
-    
-    vertices = []
-    uvs = []
-    faces = []
-    normals = []
-    tags = []
-    
-    lowest_point = [0.0, 0.0, 0.0]
-    highest_point = [0.0, 0.0, 0.0]
-    
-    for line in lines:
-        line = line.strip()
-        if line.startswith("v "):
-            vertices.append(line)
-        elif line.startswith("vt "):
-            uvs.append(line)
-        elif line.startswith("vn "):
-            normals.append(line)
-        elif line.startswith("f "):
-            faces.append(line)
-        elif line.startswith("AS3DTAG "):
-            tags.append(line)
-    
-    for vertex in vertices:
-        parts = vertex.split()
-        x, y, z = float(parts[1]), float(parts[2]), float(parts[3])
+def convert_to_mdl(input_path: Path, output_path: Path) -> bool:
+    """Convert OBJ to MDL - exact replication of original JS logic."""
+    try:
+        with open(input_path, 'r', encoding='utf-8') as f:
+            lines = f.read().split('\n')
         
-        if x < lowest_point[0]:
-            lowest_point[0] = x
-        if y < lowest_point[1]:
-            lowest_point[1] = y
-        if z < lowest_point[2]:
-            lowest_point[2] = z
-        if x > highest_point[0]:
-            highest_point[0] = x
-        if y > highest_point[1]:
-            highest_point[1] = y
-        if z > highest_point[2]:
-            highest_point[2] = z
-    
-    final_file = bytearray()
-    
-    # Header
-    final_file.extend(b'MDL!\x02\x00\x00\x00\x01')
-    final_file.extend(b'\x00' * 67)
-    
-    # Counts
-    final_file.extend(int_to_bytes(len(vertices)))
-    final_file.extend(int_to_bytes(len(uvs)))
-    final_file.extend(int_to_bytes(len(faces)))
-    final_file.extend(int_to_bytes(len(normals)))
-    final_file.extend(int_to_bytes(len(tags)))
-    
-    # Add bounding box vertices at beginning
-    vertices.insert(0, f"v {highest_point[0]} {highest_point[1]} {highest_point[2]}")
-    vertices.insert(0, f"v {lowest_point[0]} {lowest_point[1]} {lowest_point[2]}")
-    
-    # Vertices
-    for vertex in vertices:
-        parts = vertex.split()
-        x, y, z = float(parts[1]), float(parts[2]), float(parts[3])
-        final_file.extend(float_to_hex(x))
-        final_file.extend(float_to_hex(-z))
-        final_file.extend(float_to_hex(y))
-    
-    # UVs
-    for uv in uvs:
-        parts = uv.split()
-        u, v = float(parts[1]), float(parts[2])
-        final_file.extend(float_to_hex(u))
-        final_file.extend(float_to_hex(v))
-    
-    # Faces
-    for face in faces:
-        parts = face.split()
-        face_data = []
+        vertices = []
+        uvs = []
+        faces = []
+        normals = []
+        tags = []
         
-        for part in parts[1:]:
-            face_data.append(part.split('/'))
+        lowest_point = [0, 0, 0]
+        highest_point = [0, 0, 0]
         
-        for vertex_data in face_data:
-            for i in range(len(vertex_data)):
-                vertex_data[i] = str(int(vertex_data[i]) - 1)
+        # Parse lines exactly like JS
+        for line in lines:
+            if line.startswith("v "):
+                vertices.append(line)
+            elif line.startswith("vt "):
+                uvs.append(line)
+            elif line.startswith("vn "):
+                normals.append(line)
+            elif line.startswith("f "):
+                faces.append(line)
+            elif line.startswith("AS3DTAG "):
+                tags.append(line)
         
-        # Vertex indices
-        final_file.extend(int_to_bytes2(int(face_data[0][0])))
-        final_file.extend(int_to_bytes2(int(face_data[1][0])))
-        final_file.extend(int_to_bytes2(int(face_data[2][0])))
+        # Calculate bounds exactly like JS (with parseInt bug)
+        for vertex_line in vertices:
+            temp = vertex_line.split(' ')
+            temp2 = [part for part in temp if part != ' ' and part != '']
+            
+            # Replicate JS parseInt bug on floats
+            x_int = int(float(temp2[1]))  # parseInt behavior
+            y_int = int(float(temp2[2]))
+            z_int = int(float(temp2[3]))
+            
+            if x_int < lowest_point[0]: lowest_point[0] = x_int
+            if y_int < lowest_point[1]: lowest_point[1] = y_int
+            if z_int < lowest_point[2]: lowest_point[2] = z_int
+            if x_int > highest_point[0]: highest_point[0] = x_int
+            if y_int > highest_point[1]: highest_point[1] = y_int
+            if z_int > highest_point[2]: highest_point[2] = z_int
         
-        # UV indices
-        final_file.extend(int_to_bytes2(int(face_data[0][1])))
-        final_file.extend(int_to_bytes2(int(face_data[1][1])))
-        final_file.extend(int_to_bytes2(int(face_data[2][1])))
-    
-    # Normals
-    for normal in normals:
-        parts = normal.split()
-        x, y, z = float(parts[1]), float(parts[2]), float(parts[3])
-        final_file.extend(float_to_hex(x))
-        final_file.extend(float_to_hex(z))
-        final_file.extend(float_to_hex(y))
-    
-    # Tags
-    for tag in tags:
-        parts = tag.split()
-        tag_name = parts[1][:32].ljust(32, '\x00')
+        # Build final file
+        final_file = bytearray()
         
-        for char in tag_name:
-            final_file.extend(bytes([ord(char)]))
+        # Header exactly like JS
+        final_file.extend([0x4d, 0x44, 0x4c, 0x21, 0x02, 0x00, 0x00, 0x00, 0x01])
+        final_file.extend([0x00] * 67)
         
-        x, y, z = float(parts[2]), float(parts[3]), float(parts[4])
-        final_file.extend(float_to_hex(x))
-        final_file.extend(float_to_hex(-z))
-        final_file.extend(float_to_hex(y))
-        final_file.extend(b'\x00' * 12)
-    
-    output_path = Path(obj_file_path).with_suffix('.mdl')
-    with open(output_path, 'wb') as f:
-        f.write(final_file)
-    
-    print(f"converted {obj_file_path} -> {output_path}")
+        # Add bounding box vertices like JS (unshift = insert at beginning)
+        vertices.insert(0, f"v {highest_point[0]} {highest_point[1]} {highest_point[2]}")
+        vertices.insert(0, f"v {lowest_point[0]} {lowest_point[1]} {lowest_point[2]}")
+        
+        # Counts
+        final_file.extend(struct.pack('<I', len(vertices)))
+        final_file.extend(struct.pack('<I', len(uvs)))
+        final_file.extend(struct.pack('<I', len(faces)))
+        final_file.extend(struct.pack('<I', len(normals)))
+        final_file.extend(struct.pack('<I', len(tags)))
+        
+        # Vertices - exact JS transformation: X, -Z, Y
+        for vertex_line in vertices:
+            temp = vertex_line.split(' ')
+            temp2 = [part for part in temp if part != ' ' and part != '']
+            
+            x, y, z = float(temp2[1]), float(temp2[2]), float(temp2[3])
+            final_file.extend(struct.pack('<f', x))      # temp2[1]
+            final_file.extend(struct.pack('<f', -z))     # -temp2[3]
+            final_file.extend(struct.pack('<f', y))      # temp2[2]
+        
+        # UVs
+        for uv_line in uvs:
+            temp = uv_line.split(' ')
+            temp2 = [part for part in temp if part != ' ' and part != '']
+            
+            u, v = float(temp2[1]), float(temp2[2])
+            final_file.extend(struct.pack('<f', u))
+            final_file.extend(struct.pack('<f', v))
+        
+        # Faces - exact JS logic
+        for face_line in faces:
+            temp = face_line.split(' ')
+            temp2 = [part for part in temp if part != ' ' and part != '']
+            
+            temp3 = []
+            for element in temp2:
+                if element != 'f':
+                    temp3.append(element.split('/'))
+            
+            # Convert to 0-based indices like JS
+            for j in range(len(temp3)):
+                for h in range(len(temp3[j])):
+                    temp3[j][h] = str(int(temp3[j][h]) - 1)
+            
+            # Store vertex indices first, then UV indices
+            final_file.extend(struct.pack('<H', int(temp3[0][0])))  # v1
+            final_file.extend(struct.pack('<H', int(temp3[1][0])))  # v2
+            final_file.extend(struct.pack('<H', int(temp3[2][0])))  # v3
+            final_file.extend(struct.pack('<H', int(temp3[0][1])))  # uv1
+            final_file.extend(struct.pack('<H', int(temp3[1][1])))  # uv2
+            final_file.extend(struct.pack('<H', int(temp3[2][1])))  # uv3
+        
+        # Normals - exact JS transformation: X, Z, Y
+        for normal_line in normals:
+            temp = normal_line.split(' ')
+            temp2 = [part for part in temp if part != ' ' and part != '']
+            
+            x, y, z = float(temp2[1]), float(temp2[2]), float(temp2[3])
+            final_file.extend(struct.pack('<f', x))      # temp2[1]
+            final_file.extend(struct.pack('<f', z))      # temp2[3]
+            final_file.extend(struct.pack('<f', y))      # temp2[2]
+        
+        # Tags
+        for tag_line in tags:
+            temp = tag_line.split(' ')
+            temp2 = [part for part in temp if part != ' ' and part != '']
+            
+            tag_name = temp2[1]
+            if len(tag_name) > 32:
+                tag_name = tag_name[:32]
+            
+            # Tag name (32 bytes)
+            for char in tag_name:
+                final_file.extend([ord(char)])
+            for _ in range(len(tag_name), 32):
+                final_file.extend([0x00])
+            
+            # Tag position: X, -Z, Y
+            x, y, z = float(temp2[2]), float(temp2[3]), float(temp2[4])
+            final_file.extend(struct.pack('<f', x))
+            final_file.extend(struct.pack('<f', -z))
+            final_file.extend(struct.pack('<f', y))
+            
+            # Reserved 12 bytes
+            final_file.extend([0x00] * 12)
+        
+        # Write file
+        with open(output_path, 'wb') as f:
+            f.write(final_file)
+        
+        logging.info(f"converted {input_path} -> {output_path}")
+        return True
+        
+    except (IOError, ValueError, IndexError) as e:
+        logging.error(f"conversion failed: {e}")
+        return False
 
 
-def convert_to_obj(mdl_file_path):
-    with open(mdl_file_path, 'rb') as f:
-        byte_file = f.read()
-    
-    vertices_count = struct.unpack('<I', byte_file[76:80])[0]
-    uvs_count = struct.unpack('<I', byte_file[80:84])[0]
-    faces_count = struct.unpack('<I', byte_file[84:88])[0]
-    normals_count = struct.unpack('<I', byte_file[88:92])[0]
-    
-    vertices = []
-    uvs = []
-    faces = []
-    uv_indices = []
-    normals = []
-    
-    current_pos = 120
-    
-    # Read vertices
-    for i in range(vertices_count):
-        x = hex_float(byte_file[current_pos:current_pos+4])
-        z = hex_float(byte_file[current_pos+4:current_pos+8])
-        y = hex_float(byte_file[current_pos+8:current_pos+12])
-        vertices.append([x, z, y])
-        current_pos += 12
-    
-    # Read UVs
-    for i in range(uvs_count):
-        u = hex_float(byte_file[current_pos:current_pos+4])
-        v = hex_float(byte_file[current_pos+4:current_pos+8])
-        uvs.append([u, v])
-        current_pos += 8
-    
-    # Read faces
-    for i in range(faces_count):
-        v1 = struct.unpack('<H', byte_file[current_pos:current_pos+2])[0]
-        v2 = struct.unpack('<H', byte_file[current_pos+2:current_pos+4])[0]
-        v3 = struct.unpack('<H', byte_file[current_pos+4:current_pos+6])[0]
-        faces.append([v1, v2, v3])
-        current_pos += 6
+def convert_to_obj(input_path: Path, output_path: Path) -> bool:
+    """Convert MDL to OBJ - exact replication of original JS logic."""
+    try:
+        with open(input_path, 'rb') as f:
+            byte_file = f.read()
         
-        uv1 = struct.unpack('<H', byte_file[current_pos:current_pos+2])[0]
-        uv2 = struct.unpack('<H', byte_file[current_pos+2:current_pos+4])[0]
-        uv3 = struct.unpack('<H', byte_file[current_pos+4:current_pos+6])[0]
-        uv_indices.append([uv1, uv2, uv3])
-        current_pos += 6
-    
-    # Read normals
-    for i in range(normals_count):
-        x = hex_float(byte_file[current_pos:current_pos+4])
-        z = hex_float(byte_file[current_pos+4:current_pos+8])
-        y = hex_float(byte_file[current_pos+8:current_pos+12])
-        normals.append([x, z, y])
-        current_pos += 12
-    
-    # Format vertices, UVs, normals
-    for i in range(vertices_count):
-        vertices[i] = [round(v, 4) for v in vertices[i]]
-    
-    for i in range(uvs_count):
-        uvs[i] = [round(v, 4) for v in uvs[i]]
-    
-    for i in range(normals_count):
-        normals[i] = [round(v, 4) for v in normals[i]]
-    
-    # Generate OBJ content
-    final_file = f"# Vertices {vertices_count}\n"
-    
-    for vertex in vertices:
-        final_file += f"v  {vertex[0]} {vertex[2]} {-vertex[1]}\n"
-    
-    final_file += f"\n# UVs {uvs_count}\n"
-    
-    for uv in uvs:
-        final_file += f"vt  {uv[0]} {uv[1]}\n"
-    
-    final_file += f"\n# Normals {normals_count}\n"
-    
-    for normal in normals:
-        final_file += f"vn  {normal[0]} {normal[2]} {normal[1]}\n"
-    
-    final_file += f"\n# Faces {faces_count}\n"
-    
-    for i in range(faces_count):
-        face = faces[i]
-        uv_idx = uv_indices[i]
-        final_file += (f"f  {face[0]+1}/{uv_idx[0]+1}/{face[0]+1} "
-                      f"{face[1]+1}/{uv_idx[1]+1}/{face[1]+1} "
-                      f"{face[2]+1}/{uv_idx[2]+1}/{face[2]+1}\n")
-    
-    output_path = Path(mdl_file_path).with_suffix('.obj')
-    with open(output_path, 'w') as f:
-        f.write(final_file)
-    
-    print(f"converted {mdl_file_path} -> {output_path}")
+        if len(byte_file) < MDL_DATA_OFFSET or byte_file[:9] != MDL_SIGNATURE:
+            logging.error("invalid MDL file format")
+            return False
+        
+        # Read counts exactly like JS
+        vertices_count = (byte_file[79] * 256**3 + byte_file[78] * 256**2 + 
+                         byte_file[77] * 256 + byte_file[76])
+        uvs_count = (byte_file[83] * 256**3 + byte_file[82] * 256**2 + 
+                    byte_file[81] * 256 + byte_file[80])
+        faces_count = (byte_file[87] * 256**3 + byte_file[86] * 256**2 + 
+                      byte_file[85] * 256 + byte_file[84])
+        normals_count = (byte_file[91] * 256**3 + byte_file[90] * 256**2 + 
+                        byte_file[89] * 256 + byte_file[88])
+        
+        vertices = []
+        uvs = []
+        faces = []
+        uv_indices = []
+        normals = []
+        
+        current_pos = 120
+        
+        # Read vertices exactly like JS
+        for i in range(vertices_count):
+            # Read as little-endian bytes and reconstruct like JS
+            temp1 = [byte_file[current_pos + 3], byte_file[current_pos + 2], 
+                     byte_file[current_pos + 1], byte_file[current_pos]]
+            temp2 = [byte_file[current_pos + 7], byte_file[current_pos + 6], 
+                     byte_file[current_pos + 5], byte_file[current_pos + 4]]
+            temp3 = [byte_file[current_pos + 11], byte_file[current_pos + 10], 
+                     byte_file[current_pos + 9], byte_file[current_pos + 8]]
+            
+            x = struct.unpack('<f', bytes([temp1[3], temp1[2], temp1[1], temp1[0]]))[0]
+            z = struct.unpack('<f', bytes([temp2[3], temp2[2], temp2[1], temp2[0]]))[0]
+            y = struct.unpack('<f', bytes([temp3[3], temp3[2], temp3[1], temp3[0]]))[0]
+            
+            vertices.append([x, z, y])
+            current_pos += 12
+        
+        # Read UVs
+        for i in range(uvs_count):
+            temp1 = [byte_file[current_pos + 3], byte_file[current_pos + 2], 
+                     byte_file[current_pos + 1], byte_file[current_pos]]
+            temp2 = [byte_file[current_pos + 7], byte_file[current_pos + 6], 
+                     byte_file[current_pos + 5], byte_file[current_pos + 4]]
+            
+            u = struct.unpack('<f', bytes([temp1[3], temp1[2], temp1[1], temp1[0]]))[0]
+            v = struct.unpack('<f', bytes([temp2[3], temp2[2], temp2[1], temp2[0]]))[0]
+            
+            uvs.append([u, v])
+            current_pos += 8
+        
+        # Read faces exactly like JS
+        for i in range(faces_count):
+            v1 = byte_file[current_pos] + byte_file[current_pos + 1] * 256
+            v2 = byte_file[current_pos + 2] + byte_file[current_pos + 3] * 256
+            v3 = byte_file[current_pos + 4] + byte_file[current_pos + 5] * 256
+            faces.append([v1, v2, v3])
+            current_pos += 6
+            
+            uv1 = byte_file[current_pos] + byte_file[current_pos + 1] * 256
+            uv2 = byte_file[current_pos + 2] + byte_file[current_pos + 3] * 256
+            uv3 = byte_file[current_pos + 4] + byte_file[current_pos + 5] * 256
+            uv_indices.append([uv1, uv2, uv3])
+            current_pos += 6
+        
+        # Read normals
+        for i in range(normals_count):
+            temp1 = [byte_file[current_pos + 3], byte_file[current_pos + 2], 
+                     byte_file[current_pos + 1], byte_file[current_pos]]
+            temp2 = [byte_file[current_pos + 7], byte_file[current_pos + 6], 
+                     byte_file[current_pos + 5], byte_file[current_pos + 4]]
+            temp3 = [byte_file[current_pos + 11], byte_file[current_pos + 10], 
+                     byte_file[current_pos + 9], byte_file[current_pos + 8]]
+            
+            x = struct.unpack('<f', bytes([temp1[3], temp1[2], temp1[1], temp1[0]]))[0]
+            z = struct.unpack('<f', bytes([temp2[3], temp2[2], temp2[1], temp2[0]]))[0]
+            y = struct.unpack('<f', bytes([temp3[3], temp3[2], temp3[1], temp3[0]]))[0]
+            
+            normals.append([x, z, y])
+            current_pos += 12
+        
+        # Format precision exactly like JS
+        for i in range(vertices_count):
+            vertices[i][0] = round(vertices[i][0], 4)
+            vertices[i][1] = round(vertices[i][1], 4)
+            vertices[i][2] = round(vertices[i][2], 4)
+        
+        for i in range(uvs_count):
+            uvs[i][0] = round(uvs[i][0], 4)
+            uvs[i][1] = round(uvs[i][1], 4)
+        
+        for i in range(normals_count):
+            normals[i][0] = round(normals[i][0], 4)
+            normals[i][1] = round(normals[i][1], 4)
+            normals[i][2] = round(normals[i][2], 4)
+        
+        # Build OBJ exactly like JS
+        final_file = f"# Vertices {vertices_count}"
+        
+        for i in range(vertices_count):
+            # JS: vertices[i][0] + " " + vertices[i][2] + " " + (-vertices[i][1])
+            final_file += f"\nv  {vertices[i][0]} {vertices[i][2]} {-vertices[i][1]}"
+        
+        final_file += f"\n\n# UVs {uvs_count}"
+        
+        for i in range(uvs_count):
+            final_file += f"\nvt  {uvs[i][0]} {uvs[i][1]}"
+        
+        final_file += f"\n\n# Normals {normals_count}"
+        
+        for i in range(normals_count):
+            # JS: normals[i][0] + " " + normals[i][2] + " " + normals[i][1]
+            final_file += f"\nvn  {normals[i][0]} {normals[i][2]} {normals[i][1]}"
+        
+        final_file += f"\n\n# Faces {faces_count}"
+        
+        for i in range(faces_count):
+            # JS: (faces[i][0] + 1) + "/" + (uvIndices[i][0] + 1) + "/" + (faces[i][0] + 1)
+            v1, v2, v3 = faces[i][0] + 1, faces[i][1] + 1, faces[i][2] + 1
+            uv1, uv2, uv3 = uv_indices[i][0] + 1, uv_indices[i][1] + 1, uv_indices[i][2] + 1
+            
+            final_file += f"\nf  {v1}/{uv1}/{v1} {v2}/{uv2}/{v2} {v3}/{uv3}/{v3}"
+        
+        # Write file
+        with open(output_path, 'w', encoding='utf-8') as f:
+            f.write(final_file)
+        
+        logging.info(f"converted {input_path} -> {output_path}")
+        return True
+        
+    except (IOError, struct.error, IndexError) as e:
+        logging.error(f"conversion failed: {e}")
+        return False
 
 
 def main():
-    if len(sys.argv) != 2:
-        print("usage: python airstrike-converter.py <file.obj|file.mdl>")
-        sys.exit(1)
+    """Main entry point."""
+    parser = argparse.ArgumentParser(
+        description="Convert between Wavefront OBJ and Airstrike 3D MDL formats",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+examples:
+  %(prog)s model.obj                    # convert to MDL
+  %(prog)s model.mdl                    # convert to OBJ
+  %(prog)s -o output.mdl input.obj      # specify output file
+  %(prog)s --format=obj input.mdl       # force output format
+        """)
     
-    file_path = sys.argv[1]
+    parser.add_argument('input', type=Path, help="input file")
+    parser.add_argument('-o', '--output', type=Path, help="output file")
+    parser.add_argument('--format', choices=['obj', 'mdl'], help="force output format")
+    parser.add_argument('-v', '--verbose', action='store_true', help="verbose output")
+    parser.add_argument('--version', action='version', version=f'%(prog)s {__version__}')
     
-    if not Path(file_path).exists():
-        print(f"error: file {file_path} not found")
-        sys.exit(1)
+    args = parser.parse_args()
     
-    if file_path.endswith('.mdl'):
-        convert_to_obj(file_path)
-    elif file_path.endswith('.obj'):
-        convert_to_mdl(file_path)
+    setup_logging(args.verbose)
+    
+    if not args.input.exists():
+        logging.error(f"input file not found: {args.input}")
+        return 1
+    
+    # Determine conversion direction
+    input_format = detect_format(args.input)
+    if not input_format:
+        logging.error(f"unsupported input format: {args.input.suffix}")
+        return 1
+    
+    if args.format:
+        output_format = args.format
     else:
-        print("error: unsupported file format. use .obj or .mdl")
-        sys.exit(1)
+        output_format = 'mdl' if input_format == 'obj' else 'obj'
+    
+    if input_format == output_format:
+        logging.error("input and output formats are the same")
+        return 1
+    
+    # Determine output path
+    if args.output:
+        output_path = args.output
+    else:
+        output_path = args.input.with_suffix(f'.{output_format}')
+    
+    # Convert
+    if output_format == 'mdl':
+        success = convert_to_mdl(args.input, output_path)
+    else:
+        success = convert_to_obj(args.input, output_path)
+    
+    return 0 if success else 1
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
