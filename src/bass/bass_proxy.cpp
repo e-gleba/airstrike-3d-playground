@@ -3,11 +3,13 @@
 #include <windows.h>
 #include <psapi.h>
 #include <GL/gl.h>
+#include <cpuid.h>
 #include <cmath>
-#include <cstdio>
 #include <thread>
 #include <atomic>
 #include <vector>
+#include <string>
+#include <chrono>
 #include "imgui.h"
 #include "backends/imgui_impl_win32.h"
 #include "backends/imgui_impl_opengl3.h"
@@ -15,177 +17,327 @@
 // ImGui Win32 handler
 extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND, UINT, WPARAM, LPARAM);
 
-using wgl_swap_t = BOOL (WINAPI*)(HDC);
-static wgl_swap_t        real_wgl_swap    = nullptr;
-static HWND              game_window      = nullptr;
-static WNDPROC           orig_wnd_proc    = nullptr;
-static std::atomic<bool> imgui_ready      = false;
-static std::atomic<bool> shutting_down    = false;
-static BYTE              original_bytes[5];
+using wgl_swap_t = BOOL(WINAPI*)(HDC);
+static wgl_swap_t real_wgl_swap = nullptr;
+static HWND game_window = nullptr;
+static WNDPROC orig_wnd_proc = nullptr;
+static std::atomic<bool> imgui_ready = false;
+static std::atomic<bool> shutting_down = false;
+static BYTE original_bytes[5];
 
-// Overlay state
-static std::atomic<bool> overlay_visible{ true };
-static bool              dark_theme      = true;
-static ImVec4            clear_color     = ImVec4(0, 0, 0, 0);
-static bool              enable_clear    = false;
-static bool              wireframe       = false;
-static bool              invert_colors   = false;
-static float             brightness      = 1.0f;
+// Overlay settings
+static bool dark_theme = true;
+static ImVec4 clear_color = ImVec4(0,0,0,0);
+static bool enable_clear = false;
+static bool wireframe = false;
+static bool invert_colors = false;
+enum { SHADER_VIGNETTE=0, SHADER_INVERTED, SHADER_SEPIA, SHADER_SCANLINES, SHADER_COUNT };
+static int shader_type = SHADER_VIGNETTE;
+static float shader_intensity = 0.5f;
+
+// Performance data
+struct perf_data {
+    float fps=0, frame_time=0;
+    uint64_t memory_used=0, memory_total=0;
+    std::vector<float> fps_history;
+    std::chrono::steady_clock::time_point last_frame;
+    int frame_count=0;
+} g_perf;
+
+// Hook info
+struct hook_entry { std::string module, function; void* original_addr, *hook_addr; bool active; };
+static std::vector<hook_entry> g_hooks;
+
+// System info
+struct system_info { std::string cpu_name, os_version; uint64_t total_ram; } g_sysinfo;
+
+// Network stats (mock)
+struct network_stats { uint64_t bytes_sent=0, bytes_received=0; uint32_t connections=0; } g_network;
 
 // Logging
-static std::vector<const char*> log_lines;
+static std::vector<std::string> log_lines;
 static void log_msg(const char* fmt, ...) {
-    static char buf[128];
-    va_list ap; va_start(ap, fmt);
-    vsnprintf(buf, 128, fmt, ap);
-    va_end(ap);
-    log_lines.push_back(_strdup(buf));
-    if (log_lines.size() > 8) { free((void*)log_lines.front()); log_lines.erase(log_lines.begin()); }
+    char buf[256]; va_list ap; va_start(ap,fmt); vsnprintf(buf,256,fmt,ap); va_end(ap);
+    auto t = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
+    char ts[16]; strftime(ts,16,"%H:%M:%S",localtime(&t));
+    log_lines.emplace_back(ts + std::string(" ") + buf);
+    if(log_lines.size()>50) log_lines.erase(log_lines.begin());
 }
 
-// Forward
+// Forwards
 static void draw_overlay();
-static void init_console();
 static bool install_hook();
 static void remove_hooks();
+static void update_perf();
+static void init_system_info();
+static void update_network();
+static void apply_shader();
 
-// Init console
-static void init_console() {
-    AllocConsole();
-    freopen("CONOUT$", "w", stdout);
-    SetConsoleTitleA("Overlay Debug");
+// Init system info
+static void init_system_info() {
+    char brand[49]={0}; unsigned regs[4];
+    for(unsigned i=0;i<3;++i){
+        __get_cpuid(0x80000002+i, regs, regs+1, regs+2, regs+3);
+        memcpy(brand+16*i, regs, 16);
+    }
+    g_sysinfo.cpu_name=brand;
+    MEMORYSTATUSEX ms{sizeof(ms)}; GlobalMemoryStatusEx(&ms);
+    g_sysinfo.total_ram=ms.ullTotalPhys/(1024*1024);
+    OSVERSIONINFOA osv{sizeof(osv)}; GetVersionExA(&osv);
+    g_sysinfo.os_version="Windows "+std::to_string(osv.dwMajorVersion)+"."+std::to_string(osv.dwMinorVersion);
+    log_msg("sysinfo: %s, ram %lluMB",g_sysinfo.cpu_name.c_str(), g_sysinfo.total_ram);
+}
+
+// Update perf
+static void update_perf() {
+    auto now=std::chrono::steady_clock::now();
+    ++g_perf.frame_count;
+    auto ms=std::chrono::duration_cast<std::chrono::milliseconds>(now-g_perf.last_frame).count();
+    if(ms>1000){
+        g_perf.fps=g_perf.frame_count*1000.0f/ms;
+        g_perf.frame_time=ms/(float)g_perf.frame_count;
+        g_perf.fps_history.push_back(g_perf.fps);
+        if(g_perf.fps_history.size()>120) g_perf.fps_history.erase(g_perf.fps_history.begin());
+        g_perf.frame_count=0; g_perf.last_frame=now;
+    }
+    PROCESS_MEMORY_COUNTERS pmc; GetProcessMemoryInfo(GetCurrentProcess(), &pmc, sizeof(pmc));
+    g_perf.memory_used=pmc.WorkingSetSize/(1024*1024);
+    MEMORYSTATUSEX mem{sizeof(mem)}; GlobalMemoryStatusEx(&mem);
+    g_perf.memory_total=mem.ullTotalPhys/(1024*1024);
+}
+
+// Update network
+static void update_network() {
+    static auto last=std::chrono::steady_clock::now();
+    if(std::chrono::duration_cast<std::chrono::seconds>(std::chrono::steady_clock::now()-last).count()>=5){
+        g_network.bytes_sent+=rand()%1024;
+        g_network.bytes_received+=rand()%2048;
+        g_network.connections=rand()%50+1;
+        last=std::chrono::steady_clock::now();
+    }
+}
+
+// Shader effects
+static void apply_shader() {
+    glMatrixMode(GL_PROJECTION); glPushMatrix(); glLoadIdentity();
+    glMatrixMode(GL_MODELVIEW); glPushMatrix(); glLoadIdentity();
+    glDisable(GL_DEPTH_TEST);
+
+    switch(shader_type) {
+      case SHADER_VIGNETTE:
+        glEnable(GL_BLEND); glBlendFunc(GL_SRC_ALPHA,GL_ONE_MINUS_SRC_ALPHA);
+        glColor4f(0,0,0, shader_intensity);
+        glBegin(GL_TRIANGLE_FAN);
+          glVertex2f(0,0);
+          glVertex2f(-1,-1);
+          glVertex2f(1,-1);
+          glVertex2f(1,1);
+          glVertex2f(-1,1);
+        glEnd();
+        glDisable(GL_BLEND);
+        break;
+
+      case SHADER_INVERTED:
+        glEnable(GL_COLOR_LOGIC_OP); glLogicOp(GL_COPY_INVERTED);
+        glBegin(GL_TRIANGLE_FAN);
+          glVertex2f(-1,-1);
+          glVertex2f(1,-1);
+          glVertex2f(1,1);
+          glVertex2f(-1,1);
+        glEnd();
+        glDisable(GL_COLOR_LOGIC_OP);
+        break;
+
+      case SHADER_SEPIA:
+        glEnable(GL_BLEND); glBlendFunc(GL_SRC_COLOR,GL_ONE_MINUS_SRC_ALPHA);
+        glColor4f(0.44f,0.26f,0.08f, shader_intensity*0.5f);
+        glBegin(GL_TRIANGLE_FAN);
+          glVertex2f(-1,-1);
+          glVertex2f(1,-1);
+          glVertex2f(1,1);
+          glVertex2f(-1,1);
+        glEnd();
+        glDisable(GL_BLEND);
+        break;
+
+      case SHADER_SCANLINES: {
+        glEnable(GL_BLEND); glBlendFunc(GL_ZERO,GL_SRC_COLOR);
+        glColor4f(shader_intensity,shader_intensity,shader_intensity,1);
+        int lines = 200;
+        glBegin(GL_LINES);
+        for(int i=0;i<=lines;i+=2) {
+          float y = (i/(float)lines)*2-1;
+          glVertex2f(-1,y);
+          glVertex2f(1,y);
+        }
+        glEnd();
+        glDisable(GL_BLEND);
+        break;
+      }
+      default: break;
+    }
+
+    glEnable(GL_DEPTH_TEST);
+    glMatrixMode(GL_MODELVIEW); glPopMatrix();
+    glMatrixMode(GL_PROJECTION); glPopMatrix();
 }
 
 // WndProc hook
-LRESULT CALLBACK wnd_proc(HWND h, UINT m, WPARAM w, LPARAM l) {
-    if (!shutting_down.load())
-        ImGui_ImplWin32_WndProcHandler(h, m, w, l);
-    return CallWindowProc(orig_wnd_proc, h, m, w, l);
+static LRESULT CALLBACK wnd_proc(HWND h, UINT m, WPARAM w, LPARAM l) {
+    if(!shutting_down.load()) ImGui_ImplWin32_WndProcHandler(h,m,w,l);
+    return CallWindowProc(orig_wnd_proc,h,m,w,l);
 }
 
 // SwapBuffers hook
-BOOL WINAPI hook_swap(HDC dc) {
-    static bool initialized = false;
-    if (!initialized && wglGetCurrentContext()) {
-        game_window = WindowFromDC(wglGetCurrentDC());
-        orig_wnd_proc = (WNDPROC)SetWindowLongPtr(game_window, GWLP_WNDPROC, (LONG_PTR)wnd_proc);
-        initialized = true;
+static BOOL WINAPI hook_swap(HDC dc) {
+    static bool init=false;
+    if(!init && wglGetCurrentContext()){
+        game_window=WindowFromDC(wglGetCurrentDC());
+        orig_wnd_proc=(WNDPROC)SetWindowLongPtr(game_window,GWLP_WNDPROC,(LONG_PTR)wnd_proc);
+        init=true;
     }
-    if (initialized && !imgui_ready.load()) {
+    if(init && !imgui_ready.load()){
         ImGui::CreateContext();
+        ImGuiIO& io=ImGui::GetIO(); io.FontGlobalScale=1.5f;
         ImGui_ImplWin32_Init(game_window);
         ImGui_ImplOpenGL3_Init("#version 330 core");
-        imgui_ready.store(true);
+        imgui_ready=true;
+        init_system_info();
+        g_perf.last_frame=std::chrono::steady_clock::now();
+        FARPROC orig=GetProcAddress(GetModuleHandleA("opengl32.dll"),"wglSwapBuffers");
+        g_hooks.push_back({"opengl32.dll","wglSwapBuffers",(void*)orig,(void*)hook_swap,true});
     }
-    if (imgui_ready.load()) {
-        if (GetAsyncKeyState(VK_INSERT) & 1) overlay_visible = !overlay_visible;
-        if (overlay_visible.load()) draw_overlay();
+    if(imgui_ready.load()){
+        update_perf(); update_network(); draw_overlay();
     }
     return real_wgl_swap(dc);
 }
 
 // Install hook
 static bool install_hook() {
-    HMODULE m = GetModuleHandleA("opengl32.dll");
-    if (!m) return false;
-    BYTE* addr = (BYTE*)GetProcAddress(m, "wglSwapBuffers");
-    if (!addr) return false;
-    DWORD old; VirtualProtect(addr, 5, PAGE_EXECUTE_READWRITE, &old);
-    memcpy(original_bytes, addr, 5);
-    intptr_t rel = (BYTE*)hook_swap - (addr + 5);
-    addr[0] = 0xE9; memcpy(addr + 1, &rel, 4);
-    VirtualProtect(addr, 5, old, &old);
-    BYTE* tramp = (BYTE*)VirtualAlloc(nullptr, 16, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
-    memcpy(tramp, original_bytes, 5);
-    tramp[5] = 0xE9; intptr_t back = (addr + 5) - (tramp + 10);
-    memcpy(tramp + 6, &back, 4);
-    real_wgl_swap = (wgl_swap_t)tramp;
-    log_msg("hook installed");
+    HMODULE m=GetModuleHandleA("opengl32.dll");
+    if(!m) return false;
+    auto addr=(BYTE*)GetProcAddress(m,"wglSwapBuffers");
+    if(!addr) return false;
+    DWORD old; VirtualProtect(addr,5,PAGE_EXECUTE_READWRITE,&old);
+    memcpy(original_bytes,addr,5);
+    intptr_t rel=(BYTE*)hook_swap-(addr+5);
+    addr[0]=0xE9; memcpy(addr+1,&rel,4);
+    VirtualProtect(addr,5,old,&old);
+    auto tramp=(BYTE*)VirtualAlloc(nullptr,16,MEM_COMMIT|MEM_RESERVE,PAGE_EXECUTE_READWRITE);
+    memcpy(tramp,original_bytes,5);
+    tramp[5]=0xE9; intptr_t back=(addr+5)-(tramp+10);
+    memcpy(tramp+6,&back,4);
+    real_wgl_swap=(wgl_swap_t)tramp;
     return true;
 }
 
 // Remove hook
 static void remove_hooks() {
-    shutting_down = true;
-    Sleep(100);
-    if (orig_wnd_proc)
-        SetWindowLongPtr(game_window, GWLP_WNDPROC, (LONG_PTR)orig_wnd_proc);
-    HMODULE m = GetModuleHandleA("opengl32.dll");
-    if (m) {
-        BYTE* addr = (BYTE*)GetProcAddress(m, "wglSwapBuffers");
-        DWORD old; VirtualProtect(addr, 5, PAGE_EXECUTE_READWRITE, &old);
-        memcpy(addr, original_bytes, 5);
-        VirtualProtect(addr, 5, old, &old);
+    shutting_down=true; Sleep(100);
+    if(orig_wnd_proc) SetWindowLongPtr(game_window,GWLP_WNDPROC,(LONG_PTR)orig_wnd_proc);
+    HMODULE m=GetModuleHandleA("opengl32.dll");
+    if(m){
+        auto addr=(BYTE*)GetProcAddress(m,"wglSwapBuffers");
+        DWORD old; VirtualProtect(addr,5,PAGE_EXECUTE_READWRITE,&old);
+        memcpy(addr,original_bytes,5);
+        VirtualProtect(addr,5,old,&old);
     }
-    if (real_wgl_swap) VirtualFree((LPVOID)real_wgl_swap, 0, MEM_RELEASE);
-    if (imgui_ready.load()) {
+    if(real_wgl_swap) VirtualFree((LPVOID)real_wgl_swap,0,MEM_RELEASE);
+    if(imgui_ready.load()){
         ImGui_ImplOpenGL3_Shutdown();
         ImGui_ImplWin32_Shutdown();
         ImGui::DestroyContext();
     }
-    log_msg("cleanup done");
 }
 
 // Init thread
-static void init_thread() {
-    init_console();
-    install_hook();
-}
+static void init_thread(){ install_hook(); }
 
 // DllMain
-extern "C" BOOL APIENTRY DllMain(HMODULE, DWORD reason, LPVOID) {
-    if (reason == DLL_PROCESS_ATTACH) {
+extern "C" BOOL APIENTRY DllMain(HMODULE,DWORD reason,LPVOID){
+    if(reason==DLL_PROCESS_ATTACH){
         DisableThreadLibraryCalls((HMODULE)&DllMain);
         std::thread(init_thread).detach();
-    } else if (reason == DLL_PROCESS_DETACH) {
+    } else if(reason==DLL_PROCESS_DETACH){
         remove_hooks();
     }
     return TRUE;
 }
 
 // Draw overlay
-static void draw_overlay() {
+static void draw_overlay(){
     ImGui_ImplOpenGL3_NewFrame();
     ImGui_ImplWin32_NewFrame();
     ImGui::NewFrame();
+    if(dark_theme) ImGui::StyleColorsDark(); else ImGui::StyleColorsLight();
 
-    if (dark_theme) ImGui::StyleColorsDark();
-    else           ImGui::StyleColorsLight();
-
-    ImGui::Begin("Overlay", nullptr, ImGuiWindowFlags_AlwaysAutoResize);
-
-    ImGui::Checkbox("Clear Screen", &enable_clear);
-    ImGui::SameLine(); ImGui::ColorEdit3("Clear Color", (float*)&clear_color);
-
-    ImGui::Checkbox("Wireframe", &wireframe);
-    glPolygonMode(GL_FRONT_AND_BACK, wireframe ? GL_LINE : GL_FILL);
-
-    ImGui::Checkbox("Invert Colors", &invert_colors);
-    if (invert_colors) { glEnable(GL_COLOR_LOGIC_OP); glLogicOp(GL_COPY_INVERTED); }
-    else glDisable(GL_COLOR_LOGIC_OP);
-
-    ImGui::SliderFloat("Brightness", &brightness, 0.5f, 2.0f, "%.2f");
-
-    ImGui::Checkbox("Dark Theme", &dark_theme);
-
-    ImGui::Separator();
-    ImGui::Text("Log:");
-    for (auto s : log_lines)
-        ImGui::BulletText("%s", s);
-
-    if (ImGui::Button("Exit"))
-        PostQuitMessage(0);
-
+    ImGui::Begin("gilfoyle overlay",nullptr,ImGuiWindowFlags_AlwaysAutoResize);
+    if(ImGui::BeginTabBar("tabs")){
+        if(ImGui::BeginTabItem("main")){
+            ImGui::Checkbox("clear screen",&enable_clear);
+            ImGui::SameLine(); ImGui::ColorEdit3("clear color",(float*)&clear_color);
+            ImGui::Checkbox("wireframe",&wireframe);
+            glPolygonMode(GL_FRONT_AND_BACK,wireframe?GL_LINE:GL_FILL);
+            ImGui::Checkbox("invert",&invert_colors);
+            ImGui::Separator();
+            const char* items[SHADER_COUNT]={"vignette","inverted","sepia","scanlines"};
+            ImGui::Combo("shader",&shader_type,items,SHADER_COUNT);
+            ImGui::SliderFloat("intensity",&shader_intensity,0.0f,1.0f,"%.2f");
+            ImGui::Separator();
+            ImGui::Text("log (%zu)",log_lines.size());
+            if(ImGui::BeginChild("log",ImVec2(0,100),true)){
+                for(auto& l:log_lines) ImGui::TextUnformatted(l.c_str());
+                if(ImGui::GetScrollY()>=ImGui::GetScrollMaxY()) ImGui::SetScrollHereY(1.0f);
+            }
+            ImGui::EndChild();
+            if(ImGui::Button("clear log")) log_lines.clear();
+            ImGui::SameLine();
+            if(ImGui::Button("exit")) PostQuitMessage(0);
+            ImGui::EndTabItem();
+        }
+        if(ImGui::BeginTabItem("hooks")){
+            if(ImGui::BeginTable("hooks",5,ImGuiTableFlags_Borders|ImGuiTableFlags_Resizable)){
+                ImGui::TableSetupColumn("module");
+                ImGui::TableSetupColumn("function");
+                ImGui::TableSetupColumn("orig");
+                ImGui::TableSetupColumn("hook");
+                ImGui::TableSetupColumn("active");
+                ImGui::TableHeadersRow();
+                for(auto& h:g_hooks){
+                    ImGui::TableNextRow();
+                    ImGui::TableNextColumn(); ImGui::Text("%s",h.module.c_str());
+                    ImGui::TableNextColumn(); ImGui::Text("%s",h.function.c_str());
+                    ImGui::TableNextColumn(); ImGui::Text("%p",h.original_addr);
+                    ImGui::TableNextColumn(); ImGui::Text("%p",h.hook_addr);
+                    ImGui::TableNextColumn(); ImGui::Text(h.active?"yes":"no");
+                }
+                ImGui::EndTable();
+            }
+            ImGui::EndTabItem();
+        }
+        if(ImGui::BeginTabItem("performance")){
+            ImGui::Text("fps: %.1f (%.2f ms)",g_perf.fps,g_perf.frame_time);
+            ImGui::PlotLines("history",g_perf.fps_history.data(),g_perf.fps_history.size(),0,nullptr,0,120,ImVec2(0,80));
+            ImGui::Text("memory: %llu/%llu MB",g_perf.memory_used,g_perf.memory_total);
+            ImGui::Separator();
+            ImGui::Text("cpu: %s",g_sysinfo.cpu_name.c_str());
+            ImGui::Text("ram: %llu MB",g_sysinfo.total_ram);
+            ImGui::Text("os: %s",g_sysinfo.os_version.c_str());
+            ImGui::Separator();
+            ImGui::Text("net tx:%lluKB rx:%lluKB conn:%u",
+                g_network.bytes_sent/1024,g_network.bytes_received/1024,g_network.connections);
+            ImGui::EndTabItem();
+        }
+        ImGui::EndTabBar();
+    }
     ImGui::End();
-    ImGui::Render();
 
-    if (enable_clear) {
-        glClearColor(clear_color.x * brightness,
-                     clear_color.y * brightness,
-                     clear_color.z * brightness,
-                     clear_color.w);
+    ImGui::Render();
+    if(enable_clear){
+        glClearColor(clear_color.x,clear_color.y,clear_color.z,clear_color.w);
         glClear(GL_COLOR_BUFFER_BIT);
     }
-
+    apply_shader();
     ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
 }
