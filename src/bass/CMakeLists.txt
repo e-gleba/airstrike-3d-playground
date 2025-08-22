@@ -16,5 +16,4 @@ set_target_properties(bass PROPERTIES
 # static link so we ship no extra MinGW runtimes
 target_link_options(bass PRIVATE -static -s)
 
-target_link_libraries(bass PRIVATE SDL3::SDL3-static imgui)
-
+target_link_libraries(bass PRIVATE imgui_opengl2 dwmapi)

@@ -43,13 +43,13 @@ target_link_libraries(imgui PRIVATE freetype)
 #   - Arch:      sudo pacman -S mesa glu
 #   - Ubuntu:    sudo apt-get install libgl1-mesa-dev libglu1-mesa-dev
 
-add_library(imgui_sdl3_opengl3 STATIC)
+add_library(imgui_opengl2 STATIC)
 
 target_sources(
-    imgui_sdl3_opengl3
+    imgui_opengl2
     PRIVATE
-        ${imgui_SOURCE_DIR}/backends/imgui_impl_sdl3.cpp
-        ${imgui_SOURCE_DIR}/backends/imgui_impl_opengl3.cpp
+    ${imgui_SOURCE_DIR}/backends/imgui_impl_win32.cpp
+            ${imgui_SOURCE_DIR}/backends/imgui_impl_opengl2.cpp
 )
 
-target_link_libraries(imgui_sdl3_opengl3 PUBLIC imgui SDL3::SDL3)
+target_link_libraries(imgui_opengl2 PUBLIC imgui glad opengl32)
