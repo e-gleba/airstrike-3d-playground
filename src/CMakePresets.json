@@ -1,0 +1,234 @@
+{
+  "$schema": "https://cmake.org/cmake/help/latest/_downloads/3e2d73bff478d88a7de0de736ba5e361/schema.json",
+  "version": 9,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 30,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "base",
+      "displayName": "Base Configuration",
+      "description": "Base preset containing common project configurations and settings",
+      "hidden": true,
+      "generator": "Ninja Multi-Config",
+      "binaryDir": "${sourceDir}/build/${presetName}",
+      "cacheVariables": {
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
+        "CMAKE_COLOR_DIAGNOSTICS": "ON"
+      },
+      "environment": {
+        "NINJA_STATUS": "[%f/%t] "
+      }
+    },
+    {
+      "name": "msvc",
+      "displayName": "Microsoft Visual C++",
+      "description": "MSVC toolchain configuration with Windows-specific optimizations",
+      "inherits": "base",
+      "generator": "Visual Studio 17 2022",
+      "architecture": {
+        "value": "x64",
+        "strategy": "set"
+      },
+      "toolset": {
+        "value": "host=x64",
+        "strategy": "set"
+      },
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Windows"
+      },
+      "cacheVariables": {
+        "CMAKE_MSVC_RUNTIME_LIBRARY": "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL"
+      }
+    },
+    {
+      "name": "clang",
+      "displayName": "LLVM Clang",
+      "description": "Clang toolchain configuration with modern C++ standards and optimizations",
+      "inherits": "base",
+      "cacheVariables": {
+        "CMAKE_C_COMPILER": "clang",
+        "CMAKE_CXX_COMPILER": "clang++",
+        "CMAKE_CXX_FLAGS": "-Wall -Wextra -Wpedantic"
+      },
+      "environment": {
+        "CC": "clang",
+        "CXX": "clang++"
+      }
+    },
+    {
+      "name": "gcc",
+      "displayName": "GNU Compiler Collection",
+      "description": "GCC toolchain configuration with GNU-specific optimizations and standards",
+      "inherits": "base",
+      "cacheVariables": {
+        "CMAKE_C_COMPILER": "gcc",
+        "CMAKE_CXX_COMPILER": "g++",
+        "CMAKE_CXX_FLAGS": "-Wall -Wextra -Wpedantic -fdiagnostics-color=always"
+      },
+      "environment": {
+        "CC": "gcc",
+        "CXX": "g++"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "msvc",
+      "displayName": "MSVC Build",
+      "configurePreset": "msvc",
+      "configuration": "Release"
+    },
+    {
+      "name": "clang",
+      "displayName": "Clang Build",
+      "configurePreset": "clang",
+      "configuration": "Release"
+    },
+    {
+      "name": "gcc",
+      "displayName": "GCC Build",
+      "configurePreset": "gcc",
+      "configuration": "Release"
+    }
+  ],
+  "testPresets": [
+    {
+      "name": "msvc",
+      "displayName": "MSVC Tests",
+      "configurePreset": "msvc",
+      "configuration": "Release",
+      "output": {
+        "outputOnFailure": true,
+        "verbosity": "default"
+      },
+      "execution": {
+        "noTestsAction": "error",
+        "stopOnFailure": false
+      }
+    },
+    {
+      "name": "clang",
+      "displayName": "Clang Tests",
+      "configurePreset": "clang",
+      "configuration": "Release",
+      "output": {
+        "outputOnFailure": true,
+        "verbosity": "default"
+      },
+      "execution": {
+        "noTestsAction": "error",
+        "stopOnFailure": false
+      }
+    },
+    {
+      "name": "gcc",
+      "displayName": "GCC Tests",
+      "configurePreset": "gcc",
+      "configuration": "Release",
+      "output": {
+        "outputOnFailure": true,
+        "verbosity": "default"
+      },
+      "execution": {
+        "noTestsAction": "error",
+        "stopOnFailure": false
+      }
+    }
+  ],
+  "packagePresets": [
+    {
+      "name": "msvc-package",
+      "displayName": "MSVC Package",
+      "configurePreset": "msvc",
+      "generators": ["ZIP", "NSIS"]
+    },
+    {
+      "name": "clang-package",
+      "displayName": "Clang Package",
+      "configurePreset": "clang",
+      "generators": ["TGZ", "DEB"]
+    },
+    {
+      "name": "gcc-package",
+      "displayName": "GCC Package",
+      "configurePreset": "gcc",
+      "generators": ["TGZ", "RPM"]
+    }
+  ],
+  "workflowPresets": [
+    {
+      "name": "msvc-full",
+      "displayName": "MSVC Complete Pipeline",
+      "description": "Full development workflow using MSVC toolchain",
+      "steps": [
+        {
+          "type": "configure",
+          "name": "msvc"
+        },
+        {
+          "type": "build",
+          "name": "msvc"
+        },
+        {
+          "type": "test",
+          "name": "msvc"
+        },
+        {
+          "type": "package",
+          "name": "msvc-package"
+        }
+      ]
+    },
+    {
+      "name": "clang-full",
+      "displayName": "Clang Complete Pipeline",
+      "description": "Full development workflow using Clang toolchain",
+      "steps": [
+        {
+          "type": "configure",
+          "name": "clang"
+        },
+        {
+          "type": "build",
+          "name": "clang"
+        },
+        {
+          "type": "test",
+          "name": "clang"
+        },
+        {
+          "type": "package",
+          "name": "clang-package"
+        }
+      ]
+    },
+    {
+      "name": "gcc-full",
+      "displayName": "GCC Complete Pipeline",
+      "description": "Full development workflow using GCC toolchain",
+      "steps": [
+        {
+          "type": "configure",
+          "name": "gcc"
+        },
+        {
+          "type": "build",
+          "name": "gcc"
+        },
+        {
+          "type": "test",
+          "name": "gcc"
+        },
+        {
+          "type": "package",
+          "name": "gcc-package"
+        }
+      ]
+    }
+  ]
+}
