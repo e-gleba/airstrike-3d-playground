@@ -7,7 +7,6 @@ set_target_properties(bass PROPERTIES
     CXX_STANDARD_REQUIRED ON
     CXX_EXTENSIONS OFF
     POSITION_INDEPENDENT_CODE ON
-    OUTPUT_NAME "bass"   # produce bass.dll
     PREFIX ""            # no "lib" prefix
     WINDOWS_EXPORT_ALL_SYMBOLS OFF  # we rely on .def
 )
@@ -15,7 +14,7 @@ set_target_properties(bass PROPERTIES
 # static link so we ship no extra MinGW runtimes
 target_link_options(bass PRIVATE -static -s)
 
-target_link_libraries(bass PRIVATE imgui_opengl2 dwmapi)
+target_link_libraries(bass PRIVATE imgui_opengl3 dwmapi)
 
 set(STEAM_PREFIX_PATH "/home/e_gleba/.var/app/com.valvesoftware.Steam/data/Steam/steamapps/compatdata/2180100/pfx/drive_c/2.06")
 
