@@ -28,13 +28,11 @@ static std::atomic<bool> imgui_ready   = false;
 static std::atomic<bool> shutting_down = false;
 static BYTE              original_bytes[5];
 
-// Overlay settings
-static bool   dark_theme    = true;
-static ImVec4 clear_color   = ImVec4(0, 0, 0, 0);
-static bool   enable_clear  = false;
-static bool   wireframe     = false;
+static bool   dark_theme   = true;
+static ImVec4 clear_color  = ImVec4(0, 0, 0, 0);
+static bool   enable_clear = false;
+static bool   wireframe    = false;
 
-// Hook info
 struct hook_entry
 {
     std::string module, function;
@@ -43,14 +41,12 @@ struct hook_entry
 };
 static std::vector<hook_entry> g_hooks;
 
-// System info
 struct system_info
 {
     std::string cpu_name, os_version;
     uint64_t    total_ram;
 } g_sysinfo;
 
-// Logging
 static std::vector<std::string> log_lines;
 static void                     log_msg(const char* fmt, ...)
 {
@@ -71,7 +67,6 @@ static void                     log_msg(const char* fmt, ...)
 // Forwards
 static void draw_overlay();
 
-// Init system info
 static void init_system_info()
 {
     char     brand[49] = { 0 };
@@ -94,7 +89,6 @@ static void init_system_info()
             g_sysinfo.total_ram);
 }
 
-// WndProc hook
 static LRESULT CALLBACK wnd_proc(HWND h, UINT m, WPARAM w, LPARAM l)
 {
     if (!shutting_down.load())
@@ -102,7 +96,6 @@ static LRESULT CALLBACK wnd_proc(HWND h, UINT m, WPARAM w, LPARAM l)
     return CallWindowProc(orig_wnd_proc, h, m, w, l);
 }
 
-// SwapBuffers hook
 static BOOL WINAPI hook_swap(HDC dc)
 {
     static bool init = false;
@@ -137,7 +130,6 @@ static BOOL WINAPI hook_swap(HDC dc)
     return real_wgl_swap(dc);
 }
 
-// Install hook
 static bool install_hook()
 {
     HMODULE m = GetModuleHandleA("opengl32.dll");
@@ -163,7 +155,6 @@ static bool install_hook()
     return true;
 }
 
-// Remove hook
 static void remove_hooks()
 {
     shutting_down = true;
@@ -189,9 +180,6 @@ static void remove_hooks()
     }
 }
 
-
-
-// Draw overlay
 static void draw_overlay()
 {
     ImGui_ImplOpenGL3_NewFrame();
@@ -202,8 +190,9 @@ static void draw_overlay()
     else
         ImGui::StyleColorsLight();
 
-    ImGui::Begin(
-        "opengl interceptor overlay", nullptr, ImGuiWindowFlags_AlwaysAutoResize);
+    ImGui::Begin("opengl interceptor overlay",
+                 nullptr,
+                 ImGuiWindowFlags_AlwaysAutoResize);
     if (ImGui::BeginTabBar("tabs"))
     {
         if (ImGui::BeginTabItem("main"))
@@ -275,8 +264,6 @@ static void draw_overlay()
     ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
 }
 
-
-// DllMain
 extern "C" BOOL APIENTRY DllMain(HMODULE, DWORD reason, LPVOID)
 {
     if (reason == DLL_PROCESS_ATTACH)
