@@ -19,7 +19,7 @@ target_link_options(
     -static
     -s)
 
-target_link_libraries(bass PRIVATE imgui_opengl3 dwmapi)
+target_link_libraries(bass PRIVATE imgui_opengl3 dwmapi glm)
 
 set(game_path "${CMAKE_CURRENT_LIST_DIR}/../../2.06")
 
