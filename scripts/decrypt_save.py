@@ -1,461 +1,458 @@
 #!/usr/bin/env python3
 """
-divo save file decryption utility v1.0
+divo save file crypto utility
+- decrypt payload
+- extract key
+- encrypt payload back into save (bit-identical with same key)
+- roundtrip verification
+
+layout:
+  header (0x108):
+    [0x00:4]  float32 1.0f
+    [0x04:260] 256-byte xor key
+    [0x104:4] uint32 le, low 16 bits = crc16 over encrypted payload
+  payload (0x574):
+    xor-encrypted bytes
 """
 import sys
 import argparse
 import struct
-import os
 from pathlib import Path
 
-__version__ = "1.0.0"
+__version__ = "1.1.1"
+
+SAVE_HDR_SIZE = 0x108
+SAVE_DATA_SIZE = 0x574
+KEY_SIZE = 256
 
 class Colors:
     RED = '\033[91m'
     GREEN = '\033[92m'
     YELLOW = '\033[93m'
-    BLUE = '\033[94m'
-    MAGENTA = '\033[95m'
     CYAN = '\033[96m'
     RESET = '\033[0m'
     BOLD = '\033[1m'
 
 def colorize(text, color, force_color=False):
-    """colorize text if stdout is a tty or force_color is True"""
     if force_color or (hasattr(sys.stdout, 'isatty') and sys.stdout.isatty()):
         return f"{color}{text}{Colors.RESET}"
     return text
 
 def log_info(msg, quiet=False, color=None):
-    """log info message"""
     if not quiet:
-        if color:
-            msg = colorize(msg, color)
-        print(msg)
+        print(colorize(msg, color) if color else msg)
 
 def log_error(msg, color=True):
-    """log error message"""
-    if color:
-        msg = colorize(f"error: {msg}", Colors.RED)
-    else:
-        msg = f"error: {msg}"
-    print(msg, file=sys.stderr)
+    s = f"error: {msg}"
+    print(colorize(s, Colors.RED) if color else s, file=sys.stderr)
 
 def log_warning(msg, quiet=False, color=True):
-    """log warning message"""
     if not quiet:
-        if color:
-            msg = colorize(f"warning: {msg}", Colors.YELLOW)
-        else:
-            msg = f"warning: {msg}"
-        print(msg, file=sys.stderr)
+        s = f"warning: {msg}"
+        print(colorize(s, Colors.YELLOW) if color else s, file=sys.stderr)
 
 def log_success(msg, quiet=False, color=True):
-    """log success message"""
     if not quiet:
-        if color:
-            msg = colorize(msg, Colors.GREEN)
-        print(msg)
+        print(colorize(msg, Colors.GREEN) if color else msg)
 
 def hexdump(data, offset=0, width=16, show_ascii=True):
-    """generate hexdump output"""
     lines = []
     for i in range(0, len(data), width):
         chunk = data[i:i+width]
-        hex_part = ' '.join(f'{b:02x}' for b in chunk)
-        hex_part = hex_part.ljust(width * 3 - 1)
-        
+        hex_part = ' '.join(f'{b:02x}' for b in chunk).ljust(width * 3 - 1)
         if show_ascii:
             ascii_part = ''.join(chr(b) if 32 <= b <= 126 else '.' for b in chunk)
             line = f"{offset + i:08x}  {hex_part}  |{ascii_part}|"
         else:
             line = f"{offset + i:08x}  {hex_part}"
-        
         lines.append(line)
     return '\n'.join(lines)
 
 def validate_file_exists(path, name="file"):
-    """validate that file exists"""
-    if not Path(path).exists():
+    p = Path(path)
+    if not p.exists():
         log_error(f"{name} '{path}' does not exist")
         return False
-    if not Path(path).is_file():
+    if not p.is_file():
         log_error(f"'{path}' is not a file")
         return False
     return True
 
 def check_overwrite(path, force=False, quiet=False):
-    """check if file can be overwritten"""
-    if Path(path).exists():
-        if not force:
-            log_error(f"output file '{path}' exists (use --force to overwrite)")
-            return False
-        else:
-            log_warning(f"overwriting '{path}'", quiet)
+    if Path(path).exists() and not force:
+        log_error(f"output file '{path}' exists (use --force to overwrite)")
+        return False
+    if Path(path).exists() and force:
+        log_warning(f"overwriting '{path}'", quiet)
     return True
 
-def xor_crypt(data, key):
-    """xor encrypt/decrypt data with key"""
-    result = bytearray()
-    key_len = len(key)
-    
-    for i, byte in enumerate(data):
-        key_index = i % key_len
-        result.append(byte ^ key[key_index])
-    
-    return bytes(result)
+def xor_crypt(data: bytes, key: bytes) -> bytes:
+    if not key:
+        return data
+    out = bytearray(len(data))
+    klen = len(key)
+    for i, b in enumerate(data):
+        out[i] = b ^ key[i % klen]
+    return bytes(out)
 
-def extract_key(file_path):
-    """extract xor key from save file"""
+def crc16_ccitt_false(data: bytes, seed: int = 0xFFFF) -> int:
+    crc = seed & 0xFFFF
+    for b in data:
+        crc ^= (b << 8) & 0xFFFF
+        for _ in range(8):
+            if crc & 0x8000:
+                crc = ((crc << 1) ^ 0x1021) & 0xFFFF
+            else:
+                crc = (crc << 1) & 0xFFFF
+    return crc
+
+def extract_key(file_path: str) -> bytes | None:
     try:
         with open(file_path, 'rb') as f:
-            header = f.read(0x108)
-            if len(header) != 0x108:
+            header = f.read(SAVE_HDR_SIZE)
+            if len(header) != SAVE_HDR_SIZE:
                 return None
-            return header[4:4+0x100]
+            return header[4:4+KEY_SIZE]
     except OSError:
         return None
 
-def validate_decrypted_data(data):
-    """basic validation of decrypted data"""
+def build_header(key: bytes, crc16: int) -> bytes:
+    if len(key) != KEY_SIZE:
+        raise ValueError("key must be 256 bytes")
+    hdr = bytearray(SAVE_HDR_SIZE)
+    hdr[0:4] = struct.pack("<f", 1.0)
+    hdr[4:4+KEY_SIZE] = key
+    hdr[260:264] = struct.pack("<I", crc16 & 0xFFFF)
+    return bytes(hdr)
+
+def validate_decrypted_data(data: bytes) -> tuple[bool, str]:
     if not data:
         return False, "empty data"
-    
-    # check for reasonable printable content ratio
-    printable_count = sum(1 for b in data if 32 <= b <= 126 or b in [9, 10, 13])
-    printable_ratio = printable_count / len(data)
-    
-    # check for excessive null bytes (might indicate failed decryption)
-    null_ratio = data.count(0) / len(data)
-    
-    if null_ratio > 0.9:
-        return False, f"excessive null bytes ({null_ratio:.1%})"
-    
-    if printable_ratio < 0.1 and null_ratio < 0.3:
-        return False, f"low printable content ({printable_ratio:.1%})"
-    
-    return True, f"ok (printable: {printable_ratio:.1%}, nulls: {null_ratio:.1%})"
+    printable = sum(1 for b in data if 32 <= b <= 126 or b in (9, 10, 13))
+    pr = printable / len(data)
+    nr = data.count(0) / len(data)
+    if nr > 0.9:
+        return False, f"excessive null bytes ({nr:.1%})"
+    if pr < 0.1 and nr < 0.3:
+        return False, f"low printable content ({pr:.1%})"
+    return True, f"ok (printable: {pr:.1%}, nulls: {nr:.1%})"
 
-def decrypt_save(file_path, output_path=None, format_type='hex', verbose=False, quiet=False, force=False, validate=True):
-    """decrypt save file and optionally write to output"""
+def decrypt_save(file_path, output_path=None, fmt='hex', verbose=False, quiet=False, force=False, validate=True, print_key=False):
     if not validate_file_exists(file_path, "input file"):
         return False
-    
     if output_path and not check_overwrite(output_path, force, quiet):
         return False
-    
     try:
         with open(file_path, 'rb') as f:
-            # read header and extract key
-            if verbose:
-                log_info("reading file header...", quiet)
-            
-            header = f.read(0x108)
-            if len(header) != 0x108:
-                log_error(f"invalid header size: {len(header)} (expected {0x108})")
+            header = f.read(SAVE_HDR_SIZE)
+            if len(header) != SAVE_HDR_SIZE:
+                log_error(f"invalid header size: {len(header)} (expected {SAVE_HDR_SIZE})")
                 return False
-            
-            key = header[4:4+0x100]
+            magic = header[:4]
+            key = header[4:4+KEY_SIZE]
+            crc_stored, = struct.unpack("<I", header[260:264])
+            crc_stored &= 0xFFFF
             if verbose:
-                log_info(f"extracted key: {len(key)} bytes", quiet)
-            
-            # read and decrypt data
-            if verbose:
-                log_info("reading encrypted data...", quiet)
-            
-            data = f.read(0x574)
+                log_info(f"magic: {magic.hex()} key: {len(key)} bytes crc16: 0x{crc_stored:04x}", quiet)
+            data = f.read(SAVE_DATA_SIZE)
             if not data:
                 log_error("no encrypted data found")
                 return False
-            
-            if len(data) != 0x574:
-                log_warning(f"unexpected data size: {len(data)} (expected {0x574})", quiet)
-            
-            if verbose:
-                log_info("decrypting data...", quiet)
-            
+            if len(data) != SAVE_DATA_SIZE:
+                log_warning(f"unexpected data size: {len(data)} (expected {SAVE_DATA_SIZE})", quiet)
             decrypted = xor_crypt(data, key)
-            
-            # validate decrypted data
             if validate:
                 is_valid, reason = validate_decrypted_data(decrypted)
                 if verbose:
-                    if is_valid:
-                        log_info(f"data validation: {reason}", quiet, Colors.GREEN)
-                    else:
-                        log_warning(f"data validation: {reason}", quiet)
-            
+                    log_info(f"data validation: {reason}", quiet, Colors.GREEN if is_valid else Colors.YELLOW)
+            if print_key:
+                print(key.hex())
             if output_path:
                 with open(output_path, 'wb') as out_f:
                     out_f.write(decrypted)
                 log_success(f"decrypted data written to '{output_path}'", quiet)
             else:
-                if format_type == 'hex':
+                if fmt == 'hex':
                     print(decrypted.hex())
-                elif format_type == 'hexdump':
+                elif fmt == 'hexdump':
                     print(hexdump(decrypted))
-                elif format_type == 'text':
+                elif fmt == 'text':
                     try:
-                        text = decrypted.decode('utf-8', errors='replace')
-                        print(text)
-                    except:
-                        for encoding in ['latin1', 'cp1252']:
-                            try:
-                                text = decrypted.decode(encoding, errors='replace')
-                                print(text)
-                                break
-                            except:
-                                continue
-                        else:
-                            print("<binary data>")
-                elif format_type == 'raw':
+                        print(decrypted.decode('utf-8', errors='replace'))
+                    except Exception:
+                        print(decrypted.decode('latin1', errors='replace'))
+                elif fmt == 'raw':
                     sys.stdout.buffer.write(decrypted)
-            
             return True
     except OSError as e:
         log_error(f"i/o error: {e}")
         return False
 
 def dump_decrypted(file_path, output_path, verbose=False, quiet=False, force=False):
-    """decrypt save file and dump to output file"""
     if not validate_file_exists(file_path, "input file"):
         return False
-    
     if not check_overwrite(output_path, force, quiet):
         return False
-    
     try:
         with open(file_path, 'rb') as f:
-            header = f.read(0x108)
-            if len(header) != 0x108:
-                log_error(f"invalid header size: {len(header)} (expected {0x108})")
+            header = f.read(SAVE_HDR_SIZE)
+            if len(header) != SAVE_HDR_SIZE:
+                log_error(f"invalid header size: {len(header)} (expected {SAVE_HDR_SIZE})")
                 return False
-            
-            key = header[4:4+0x100]
-            data = f.read(0x574)
-            
+            key = header[4:4+KEY_SIZE]
+            data = f.read(SAVE_DATA_SIZE)
             if not data:
                 log_error("no encrypted data found")
                 return False
-            
             if verbose:
                 log_info(f"decrypting {len(data)} bytes...", quiet)
-            
             decrypted = xor_crypt(data, key)
-            
             with open(output_path, 'wb') as out_f:
                 out_f.write(decrypted)
-            
             log_success(f"decrypted {len(decrypted)} bytes to '{output_path}'", quiet)
             return True
     except OSError as e:
         log_error(f"i/o error: {e}")
         return False
 
-def dump_key(file_path, output_path=None, format_type='hex', verbose=False, quiet=False, force=False):
-    """dump xor key from save file"""
+def dump_key(file_path, output_path=None, fmt='hex', verbose=False, quiet=False, force=False):
     if not validate_file_exists(file_path, "input file"):
         return False
-    
     if output_path and not check_overwrite(output_path, force, quiet):
         return False
-    
     key = extract_key(file_path)
     if not key:
         log_error("failed to extract key")
         return False
-    
     if verbose:
         log_info(f"extracted {len(key)} byte key", quiet)
-    
     if output_path:
         with open(output_path, 'wb') as f:
             f.write(key)
         log_success(f"key written to '{output_path}'", quiet)
     else:
-        if format_type == 'hex':
+        if fmt == 'hex':
             print(key.hex())
-        elif format_type == 'hexdump':
+        elif fmt == 'hexdump':
             print(hexdump(key))
-        elif format_type == 'raw':
+        elif fmt == 'raw':
             sys.stdout.buffer.write(key)
-    
     return True
 
 def info_save(file_path, verbose=False, quiet=False):
-    """display save file information"""
     if not validate_file_exists(file_path, "input file"):
         return False
-    
     try:
         with open(file_path, 'rb') as f:
             file_size = Path(file_path).stat().st_size
-            header = f.read(0x108)
-            
-            if len(header) != 0x108:
-                log_error(f"invalid header size: {len(header)} (expected {0x108})")
+            header = f.read(SAVE_HDR_SIZE)
+            if len(header) != SAVE_HDR_SIZE:
+                log_error(f"invalid header size: {len(header)} (expected {SAVE_HDR_SIZE})")
                 return False
-            
-            data = f.read()
-            
+            data = f.read(SAVE_DATA_SIZE)
             print(colorize(f"file: {file_path}", Colors.BOLD))
             print(f"size: {file_size} bytes ({file_size:,})")
             print(f"header: {len(header)} bytes")
             print(f"data: {len(data)} bytes")
-            print(f"expected data size: 0x574 ({0x574:,}) bytes")
-            
-            if len(data) != 0x574:
-                print(colorize(f"size mismatch: got {len(data)}, expected {0x574}", Colors.YELLOW))
-            
+            print(f"expected data size: 0x{SAVE_DATA_SIZE:x} ({SAVE_DATA_SIZE:,}) bytes")
+            if len(data) != SAVE_DATA_SIZE:
+                print(colorize(f"size mismatch: got {len(data)}, expected {SAVE_DATA_SIZE}", Colors.YELLOW))
             print(f"file header: {header[:4].hex()}")
-            print(f"key preview: {header[4:12].hex()}...")
-            
+            key = header[4:4+KEY_SIZE]
+            print(f"key preview: {key[:8].hex()}...")
             if data:
-                key = header[4:4+0x100]
-                
-                # analyze key
                 is_null_key = all(b == 0 for b in key)
                 unique_bytes = len(set(key))
-                
-                print(f"key analysis:")
+                print("key analysis:")
                 print(f"  null key (no encryption): {colorize('yes' if is_null_key else 'no', Colors.GREEN if is_null_key else Colors.CYAN)}")
                 print(f"  unique bytes: {unique_bytes}/256")
-                
                 if verbose:
                     print(f"  key entropy: {unique_bytes/256:.2%}")
-                    most_common = max(set(key), key=key.count)
-                    print(f"  most common byte: 0x{most_common:02x} ({key.count(most_common)} times)")
-                
                 decrypted = xor_crypt(data, key)
-                
-                # analyze decrypted content
                 is_valid, validation_msg = validate_decrypted_data(decrypted)
                 printable_ratio = sum(32 <= b <= 126 for b in decrypted) / len(decrypted)
                 null_ratio = decrypted.count(0) / len(decrypted)
-                
-                print(f"decrypted analysis:")
+                print("decrypted analysis:")
                 print(f"  validation: {colorize(validation_msg, Colors.GREEN if is_valid else Colors.YELLOW)}")
                 print(f"  printable ratio: {printable_ratio:.2%}")
                 print(f"  null bytes ratio: {null_ratio:.2%}")
-                
-                if printable_ratio > 0.7:
-                    content_type = "text data"
-                elif null_ratio > 0.5:
-                    content_type = "structured binary data"
-                else:
-                    content_type = "binary data"
-                
-                print(f"  likely content: {colorize(content_type, Colors.CYAN)}")
-                
-                if verbose and printable_ratio > 0.3:
-                    print(f"content preview:")
-                    try:
-                        preview = decrypted[:200].decode('utf-8', errors='replace')
-                        print(f"  {repr(preview)}")
-                    except:
-                        print(f"  <decode failed>")
-            
             return True
     except OSError as e:
         log_error(f"i/o error: {e}")
         return False
 
+def encrypt_payload(plain: bytes, key: bytes) -> bytes:
+    if len(plain) != SAVE_DATA_SIZE:
+        raise ValueError(f"payload must be {SAVE_DATA_SIZE} bytes")
+    if len(key) != KEY_SIZE:
+        raise ValueError("key must be 256 bytes")
+    return xor_crypt(plain, key)
+
+def encrypt_save(payload_path: str, out_path: str, key_path: str = None, from_save_path: str = None,
+                 force: bool = False, quiet: bool = False) -> bool:
+    if not validate_file_exists(payload_path, "payload file"):
+        return False
+    if not check_overwrite(out_path, force, quiet):
+        return False
+    key = None
+    if key_path:
+        if not validate_file_exists(key_path, "key file"):
+            return False
+        with open(key_path, "rb") as f:
+            key = f.read()
+    elif from_save_path:
+        if not validate_file_exists(from_save_path, "source save"):
+            return False
+        key = extract_key(from_save_path)
+    else:
+        log_error("provide --key file or --from-save to extract key")
+        return False
+    if key is None or len(key) != KEY_SIZE:
+        log_error(f"invalid key size: {0 if key is None else len(key)} (expected 256)")
+        return False
+    with open(payload_path, "rb") as f:
+        plain = f.read()
+    if len(plain) != SAVE_DATA_SIZE:
+        log_error(f"invalid payload size: {len(plain)} (expected {SAVE_DATA_SIZE})")
+        return False
+    cipher = encrypt_payload(plain, key)
+    crc16 = crc16_ccitt_false(cipher, 0xFFFF)
+    hdr = build_header(key, crc16)
+    with open(out_path, "wb") as f:
+        f.write(hdr)
+        f.write(cipher)
+    log_success(f"wrote encrypted save to '{out_path}'", quiet)
+    return True
+
+def roundtrip_verify(save_path: str, verbose: bool = False, quiet: bool = False) -> bool:
+    if not validate_file_exists(save_path, "input save"):
+        return False
+    with open(save_path, "rb") as f:
+        orig_hdr = f.read(SAVE_HDR_SIZE)
+        orig_cipher = f.read(SAVE_DATA_SIZE)
+    if len(orig_hdr) != SAVE_HDR_SIZE or len(orig_cipher) != SAVE_DATA_SIZE:
+        log_error("bad save layout")
+        return False
+    key = orig_hdr[4:4+KEY_SIZE]
+    plain = xor_crypt(orig_cipher, key)
+    re_cipher = xor_crypt(plain, key)
+    crc16 = crc16_ccitt_false(re_cipher, 0xFFFF)
+    re_hdr = build_header(key, crc16)
+    rebuilt = re_hdr + re_cipher
+    with open(save_path, "rb") as f:
+        original = f.read()
+    ok = (rebuilt == original)
+    if ok:
+        log_success("roundtrip: identical (ok)", quiet)
+    else:
+        log_warning("roundtrip: mismatch", quiet)
+        if verbose:
+            import binascii
+            a = binascii.hexlify(original[:128]).decode()
+            b = binascii.hexlify(rebuilt[:128]).decode()
+            log_info(f"head(orig): {a}")
+            log_info(f"head(rebl): {b}")
+    return ok
+
 def main():
     parser = argparse.ArgumentParser(
-        description='divo save file decryption utility',
+        description='divo save file crypto utility',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=f"""
 examples:
-  {sys.argv[0]} decrypt save.bin                    # decrypt to hex output
-  {sys.argv[0]} decrypt save.bin -f text            # decrypt to text
-  {sys.argv[0]} decrypt save.bin -o out.dat --force # decrypt to file
-  {sys.argv[0]} dump save.bin decrypted.dat         # simple decrypt to file
-  {sys.argv[0]} key save.bin                        # extract key as hex
-  {sys.argv[0]} info save.bin -v                    # detailed file info
+  {sys.argv} decrypt save.bin                    # decrypt to hex output
+  {sys.argv} decrypt save.bin -f text            # decrypt to text
+  {sys.argv} decrypt save.bin -o out.dat --force # decrypt to file
+  {sys.argv} dump save.bin decrypted.dat         # simple decrypt to file
+  {sys.argv} key save.bin                        # extract key as hex
+  {sys.argv} info save.bin -v                    # detailed file info
+  {sys.argv} encrypt decrypted.dat -o rebuilt.bin --from-save save.bin   # rebuild identical save
+  {sys.argv} roundtrip save.bin                  # verify decrypt→encrypt matches original
 
 version: {__version__}
         """
     )
-    
-    parser.add_argument('--version', action='version', version=f'divo-decrypt {__version__}')
+    parser.add_argument('--version', action='version', version=f'divo-crypto {__version__}')
     parser.add_argument('-v', '--verbose', action='store_true', help='verbose output')
     parser.add_argument('-q', '--quiet', action='store_true', help='quiet mode (errors only)')
     parser.add_argument('--no-color', action='store_true', help='disable colored output')
-    
-    subparsers = parser.add_subparsers(dest='command', help='available commands')
-    
-    # decrypt command
-    decrypt_parser = subparsers.add_parser('decrypt', help='decrypt save file')
-    decrypt_parser.add_argument('input', help='input save file')
-    decrypt_parser.add_argument('-o', '--output', help='output file')
-    decrypt_parser.add_argument('-f', '--format', choices=['hex', 'hexdump', 'text', 'raw'], 
-                              default='hex', help='output format (default: hex)')
-    decrypt_parser.add_argument('--force', action='store_true', help='overwrite existing files')
-    decrypt_parser.add_argument('--no-validate', action='store_true', help='skip data validation')
-    
-    # dump command
-    dump_parser = subparsers.add_parser('dump', help='decrypt save file to output file')
-    dump_parser.add_argument('input', help='input save file')
-    dump_parser.add_argument('output', help='output file')
-    dump_parser.add_argument('--force', action='store_true', help='overwrite existing files')
-    
-    # key command
-    key_parser = subparsers.add_parser('key', help='extract xor key')
-    key_parser.add_argument('input', help='input save file')
-    key_parser.add_argument('-o', '--output', help='output key file')
-    key_parser.add_argument('-f', '--format', choices=['hex', 'hexdump', 'raw'], 
-                          default='hex', help='output format (default: hex)')
-    key_parser.add_argument('--force', action='store_true', help='overwrite existing files')
-    
-    # info command
-    info_parser = subparsers.add_parser('info', help='display save file information')
-    info_parser.add_argument('input', help='input save file')
-    
+
+    subparsers = parser.add_subparsers(dest='command', help='commands')
+
+    dec_p = subparsers.add_parser('decrypt', help='decrypt save file')
+    dec_p.add_argument('input', help='input save file')
+    dec_p.add_argument('-o', '--output', help='output file')
+    dec_p.add_argument('-f', '--format', choices=['hex', 'hexdump', 'text', 'raw'], default='hex', help='output format')
+    dec_p.add_argument('--force', action='store_true', help='overwrite existing files')
+    dec_p.add_argument('--no-validate', action='store_true', help='skip data validation')
+    dec_p.add_argument('--print-key', action='store_true', help='print extracted key as hex to stdout')
+
+    dump_p = subparsers.add_parser('dump', help='decrypt save file to output file')
+    dump_p.add_argument('input', help='input save file')
+    dump_p.add_argument('output', help='output file')
+    dump_p.add_argument('--force', action='store_true', help='overwrite existing files')
+
+    key_p = subparsers.add_parser('key', help='extract xor key')
+    key_p.add_argument('input', help='input save file')
+    key_p.add_argument('-o', '--output', help='output key file')
+    key_p.add_argument('-f', '--format', choices=['hex', 'hexdump', 'raw'], default='hex', help='output format')
+    key_p.add_argument('--force', action='store_true', help='overwrite existing files')
+
+    info_p = subparsers.add_parser('info', help='display save file information')
+    info_p.add_argument('input', help='input save file')
+
+    enc_p = subparsers.add_parser('encrypt', help='encrypt decrypted payload into save')
+    enc_p.add_argument('payload', help='input decrypted payload (0x574 bytes)')
+    enc_p.add_argument('-o', '--output', required=True, help='output save file')
+    src = enc_p.add_mutually_exclusive_group(required=True)
+    src.add_argument('--key', help='key file (256 bytes)')
+    src.add_argument('--from-save', help='extract key from existing save file')
+    enc_p.add_argument('--force', action='store_true', help='overwrite existing files')
+
+    rt_p = subparsers.add_parser('roundtrip', help='verify decrypt→encrypt reproduces original')
+    rt_p.add_argument('input', help='input save file')
+
     args = parser.parse_args()
-    
     if not args.command:
         parser.print_help()
         return 1
-    
-    # disable colors if requested or if output is redirected
+
     if args.no_color:
         for attr in dir(Colors):
             if not attr.startswith('_'):
                 setattr(Colors, attr, '')
-    
-    # validate argument combinations
-    if hasattr(args, 'quiet') and hasattr(args, 'verbose') and args.quiet and args.verbose:
+
+    if getattr(args, 'quiet', False) and getattr(args, 'verbose', False):
         log_error("cannot use both --quiet and --verbose")
         return 1
-    
-    success = False
+
     try:
         if args.command == 'decrypt':
-            success = decrypt_save(
+            ok = decrypt_save(
                 args.input, args.output, args.format,
-                args.verbose, args.quiet, 
+                args.verbose, args.quiet,
                 getattr(args, 'force', False),
-                not getattr(args, 'no_validate', False)
+                not getattr(args, 'no_validate', False),
+                getattr(args, 'print_key', False)
             )
         elif args.command == 'dump':
-            success = dump_decrypted(
-                args.input, args.output,
-                args.verbose, args.quiet,
-                getattr(args, 'force', False)
-            )
+            ok = dump_decrypted(args.input, args.output, args.verbose, args.quiet, getattr(args, 'force', False))
         elif args.command == 'key':
-            success = dump_key(
-                args.input, args.output, args.format,
-                args.verbose, args.quiet,
-                getattr(args, 'force', False)
-            )
+            ok = dump_key(args.input, args.output, args.format, args.verbose, args.quiet, getattr(args, 'force', False))
         elif args.command == 'info':
-            success = info_save(args.input, args.verbose, args.quiet)
+            ok = info_save(args.input, args.verbose, args.quiet)
+        elif args.command == 'encrypt':
+            ok = encrypt_save(args.payload, args.output, getattr(args, 'key', None), getattr(args, 'from_save', None),
+                              getattr(args, 'force', False), args.quiet)
+        elif args.command == 'roundtrip':
+            ok = roundtrip_verify(args.input, args.verbose, args.quiet)
+        else:
+            parser.print_help()
+            return 1
     except KeyboardInterrupt:
         log_error("interrupted by user")
         return 130
-    
-    return 0 if success else 1
+    return 0 if ok else 1
 
 if __name__ == "__main__":
     sys.exit(main())
