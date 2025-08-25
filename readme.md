@@ -2,7 +2,7 @@
 
 **Reverse engineering the AirStrike 3D game series**
 
-![gamelogo](logo.jpg)
+![gamelogo](.github/logo.jpg)
 
 [PCGamingWiki](https://www.pcgamingwiki.com/wiki/AirStrike_2) -  [Original Game](https://en.wikipedia.org/wiki/AirStrike_3D)
 
@@ -10,9 +10,9 @@
 
 My nostalgic journey into reverse engineering AirStrike 3D - the first PC game that captured my imagination as a kid. This repository contains tools and research for understanding the game's internals.
 
-![overlay preview](overlay.png)
+![overlay preview](.github/overlay.png)
 
-![overlay wireframe](overlay_wireframe.png)
+![overlay wireframe](.github/overlay_wireframe.png)
 
 ## 🔧 Tools
 
