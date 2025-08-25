@@ -1,8 +1,9 @@
-// bass_overlay.cpp
 #define WIN32_LEAN_AND_MEAN
+
 #include "backends/imgui_impl_opengl3.h"
 #include "backends/imgui_impl_win32.h"
 #include "imgui.h"
+
 #include <GL/gl.h>
 #include <atomic>
 #include <chrono>
@@ -14,7 +15,6 @@
 #include <vector>
 #include <windows.h>
 
-// ImGui Win32 handler
 extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND,
                                                              UINT,
                                                              WPARAM,
@@ -70,9 +70,6 @@ static void                     log_msg(const char* fmt, ...)
 
 // Forwards
 static void draw_overlay();
-static bool install_hook();
-static void remove_hooks();
-static void init_system_info();
 
 // Init system info
 static void init_system_info()
@@ -192,20 +189,7 @@ static void remove_hooks()
     }
 }
 
-// DllMain
-extern "C" BOOL APIENTRY DllMain(HMODULE, DWORD reason, LPVOID)
-{
-    if (reason == DLL_PROCESS_ATTACH)
-    {
-        DisableThreadLibraryCalls((HMODULE)&DllMain);
-        std::thread(install_hook).detach();
-    }
-    else if (reason == DLL_PROCESS_DETACH)
-    {
-        remove_hooks();
-    }
-    return TRUE;
-}
+
 
 // Draw overlay
 static void draw_overlay()
@@ -289,4 +273,20 @@ static void draw_overlay()
         glClear(GL_COLOR_BUFFER_BIT);
     }
     ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
+}
+
+
+// DllMain
+extern "C" BOOL APIENTRY DllMain(HMODULE, DWORD reason, LPVOID)
+{
+    if (reason == DLL_PROCESS_ATTACH)
+    {
+        DisableThreadLibraryCalls((HMODULE)&DllMain);
+        std::thread(install_hook).detach();
+    }
+    else if (reason == DLL_PROCESS_DETACH)
+    {
+        remove_hooks();
+    }
+    return TRUE;
 }
