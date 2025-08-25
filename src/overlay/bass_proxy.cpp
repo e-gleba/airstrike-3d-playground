@@ -33,17 +33,6 @@ static bool   dark_theme    = true;
 static ImVec4 clear_color   = ImVec4(0, 0, 0, 0);
 static bool   enable_clear  = false;
 static bool   wireframe     = false;
-static bool   invert_colors = false;
-enum
-{
-    SHADER_VIGNETTE = 0,
-    SHADER_INVERTED,
-    SHADER_SEPIA,
-    SHADER_SCANLINES,
-    SHADER_COUNT
-};
-static int   shader_type      = SHADER_VIGNETTE;
-static float shader_intensity = 0.5f;
 
 // Performance data
 struct perf_data
@@ -71,13 +60,6 @@ struct system_info
     uint64_t    total_ram;
 } g_sysinfo;
 
-// Network stats (mock)
-struct network_stats
-{
-    uint64_t bytes_sent = 0, bytes_received = 0;
-    uint32_t connections = 0;
-} g_network;
-
 // Logging
 static std::vector<std::string> log_lines;
 static void                     log_msg(const char* fmt, ...)
@@ -102,8 +84,6 @@ static bool install_hook();
 static void remove_hooks();
 static void update_perf();
 static void init_system_info();
-static void update_network();
-static void apply_shader();
 
 // Init system info
 static void init_system_info()
@@ -154,101 +134,6 @@ static void update_perf()
     g_perf.memory_total = mem.ullTotalPhys / (1024 * 1024);
 }
 
-// Update network
-static void update_network()
-{
-    static auto last = std::chrono::steady_clock::now();
-    if (std::chrono::duration_cast<std::chrono::seconds>(
-            std::chrono::steady_clock::now() - last)
-            .count() >= 5)
-    {
-        g_network.bytes_sent += rand() % 1024;
-        g_network.bytes_received += rand() % 2048;
-        g_network.connections = rand() % 50 + 1;
-        last                  = std::chrono::steady_clock::now();
-    }
-}
-
-// Shader effects
-static void apply_shader()
-{
-    glMatrixMode(GL_PROJECTION);
-    glPushMatrix();
-    glLoadIdentity();
-    glMatrixMode(GL_MODELVIEW);
-    glPushMatrix();
-    glLoadIdentity();
-    glDisable(GL_DEPTH_TEST);
-
-    switch (shader_type)
-    {
-        case SHADER_VIGNETTE:
-            glEnable(GL_BLEND);
-            glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-            glColor4f(0, 0, 0, shader_intensity);
-            glBegin(GL_TRIANGLE_FAN);
-            glVertex2f(0, 0);
-            glVertex2f(-1, -1);
-            glVertex2f(1, -1);
-            glVertex2f(1, 1);
-            glVertex2f(-1, 1);
-            glEnd();
-            glDisable(GL_BLEND);
-            break;
-
-        case SHADER_INVERTED:
-            glEnable(GL_COLOR_LOGIC_OP);
-            glLogicOp(GL_COPY_INVERTED);
-            glBegin(GL_TRIANGLE_FAN);
-            glVertex2f(-1, -1);
-            glVertex2f(1, -1);
-            glVertex2f(1, 1);
-            glVertex2f(-1, 1);
-            glEnd();
-            glDisable(GL_COLOR_LOGIC_OP);
-            break;
-
-        case SHADER_SEPIA:
-            glEnable(GL_BLEND);
-            glBlendFunc(GL_SRC_COLOR, GL_ONE_MINUS_SRC_ALPHA);
-            glColor4f(0.44f, 0.26f, 0.08f, shader_intensity * 0.5f);
-            glBegin(GL_TRIANGLE_FAN);
-            glVertex2f(-1, -1);
-            glVertex2f(1, -1);
-            glVertex2f(1, 1);
-            glVertex2f(-1, 1);
-            glEnd();
-            glDisable(GL_BLEND);
-            break;
-
-        case SHADER_SCANLINES:
-        {
-            glEnable(GL_BLEND);
-            glBlendFunc(GL_ZERO, GL_SRC_COLOR);
-            glColor4f(shader_intensity, shader_intensity, shader_intensity, 1);
-            int lines = 200;
-            glBegin(GL_LINES);
-            for (int i = 0; i <= lines; i += 2)
-            {
-                float y = (i / (float)lines) * 2 - 1;
-                glVertex2f(-1, y);
-                glVertex2f(1, y);
-            }
-            glEnd();
-            glDisable(GL_BLEND);
-            break;
-        }
-        default:
-            break;
-    }
-
-    glEnable(GL_DEPTH_TEST);
-    glMatrixMode(GL_MODELVIEW);
-    glPopMatrix();
-    glMatrixMode(GL_PROJECTION);
-    glPopMatrix();
-}
-
 // WndProc hook
 static LRESULT CALLBACK wnd_proc(HWND h, UINT m, WPARAM w, LPARAM l)
 {
@@ -289,7 +174,6 @@ static BOOL WINAPI hook_swap(HDC dc)
     if (imgui_ready.load())
     {
         update_perf();
-        update_network();
         draw_overlay();
     }
     return real_wgl_swap(dc);
@@ -390,14 +274,6 @@ static void draw_overlay()
             ImGui::ColorEdit3("clear color", (float*)&clear_color);
             ImGui::Checkbox("wireframe", &wireframe);
             glPolygonMode(GL_FRONT_AND_BACK, wireframe ? GL_LINE : GL_FILL);
-            ImGui::Checkbox("invert", &invert_colors);
-            ImGui::Separator();
-            const char* items[SHADER_COUNT] = {
-                "vignette", "inverted", "sepia", "scanlines"
-            };
-            ImGui::Combo("shader", &shader_type, items, SHADER_COUNT);
-            ImGui::SliderFloat(
-                "intensity", &shader_intensity, 0.0f, 1.0f, "%.2f");
             ImGui::Separator();
             ImGui::Text("log (%zu)", log_lines.size());
             if (ImGui::BeginChild("log", ImVec2(0, 100), true))
@@ -446,31 +322,6 @@ static void draw_overlay()
             }
             ImGui::EndTabItem();
         }
-        if (ImGui::BeginTabItem("performance"))
-        {
-            ImGui::Text("fps: %.1f (%.2f ms)", g_perf.fps, g_perf.frame_time);
-            ImGui::PlotLines("history",
-                             g_perf.fps_history.data(),
-                             g_perf.fps_history.size(),
-                             0,
-                             nullptr,
-                             0,
-                             120,
-                             ImVec2(0, 80));
-            ImGui::Text("memory: %llu/%llu MB",
-                        g_perf.memory_used,
-                        g_perf.memory_total);
-            ImGui::Separator();
-            ImGui::Text("cpu: %s", g_sysinfo.cpu_name.c_str());
-            ImGui::Text("ram: %llu MB", g_sysinfo.total_ram);
-            ImGui::Text("os: %s", g_sysinfo.os_version.c_str());
-            ImGui::Separator();
-            ImGui::Text("net tx:%lluKB rx:%lluKB conn:%u",
-                        g_network.bytes_sent / 1024,
-                        g_network.bytes_received / 1024,
-                        g_network.connections);
-            ImGui::EndTabItem();
-        }
         ImGui::EndTabBar();
     }
     ImGui::End();
@@ -482,6 +333,5 @@ static void draw_overlay()
             clear_color.x, clear_color.y, clear_color.z, clear_color.w);
         glClear(GL_COLOR_BUFFER_BIT);
     }
-    apply_shader();
     ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
 }
