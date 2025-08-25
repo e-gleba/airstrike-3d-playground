@@ -12,7 +12,7 @@
 #include <psapi.h>
 #include <string>
 #include <vector>
-
+#include <algorithm>
 
 #include <windows.h>
 
@@ -165,7 +165,6 @@ static void draw_overlay();
 void remove_hooks()
 {
     shutting_down = true;
-    Sleep(100);
     if (orig_wnd_proc)
         SetWindowLongPtr(game_window, GWLP_WNDPROC, (LONG_PTR)orig_wnd_proc);
     HMODULE m = GetModuleHandleA("opengl32.dll");
@@ -189,85 +188,205 @@ void remove_hooks()
 
 static void draw_overlay()
 {
+    if (!ImGui::GetCurrentContext()) return;
+
     ImGui_ImplOpenGL3_NewFrame();
     ImGui_ImplWin32_NewFrame();
     ImGui::NewFrame();
-    if (dark_theme)
-        ImGui::StyleColorsDark();
-    else
-        ImGui::StyleColorsLight();
 
-    ImGui::Begin("opengl interceptor overlay",
-                 nullptr,
-                 ImGuiWindowFlags_AlwaysAutoResize);
-    if (ImGui::BeginTabBar("tabs"))
+    static bool style_init = false;
+    static bool last_dark = false;
+    if (!style_init || last_dark != dark_theme)
+    {
+        last_dark = dark_theme;
+        if (dark_theme) ImGui::StyleColorsDark(); else ImGui::StyleColorsLight();
+
+        auto& s = ImGui::GetStyle();
+        s.WindowRounding = 8.0f;
+        s.FrameRounding = 6.0f;
+        s.GrabRounding = 6.0f;
+        s.WindowBorderSize = 0.0f;
+        s.FrameBorderSize = 0.0f;
+        s.PopupBorderSize = 0.0f;
+        s.WindowPadding = ImVec2(12, 10);
+        s.FramePadding  = ImVec2(8, 6);
+        s.ItemSpacing   = ImVec2(8, 6);
+        s.ScrollbarSize = 12.0f;
+
+        ImVec4 accent = dark_theme ? ImVec4(0.23f, 0.52f, 0.96f, 1.0f)
+                                   : ImVec4(0.16f, 0.47f, 0.96f, 1.0f);
+        auto& c = s.Colors;
+        c[ImGuiCol_TitleBgActive]   = ImVec4(0,0,0,0);
+        c[ImGuiCol_Button]          = ImVec4(accent.x, accent.y, accent.z, 0.12f);
+        c[ImGuiCol_ButtonHovered]   = ImVec4(accent.x, accent.y, accent.z, 0.20f);
+        c[ImGuiCol_ButtonActive]    = ImVec4(accent.x, accent.y, accent.z, 0.30f);
+        c[ImGuiCol_CheckMark]       = accent;
+        c[ImGuiCol_SliderGrab]      = accent;
+        c[ImGuiCol_SliderGrabActive]= accent;
+        c[ImGuiCol_Header]          = ImVec4(accent.x, accent.y, accent.z, 0.12f);
+        c[ImGuiCol_HeaderHovered]   = ImVec4(accent.x, accent.y, accent.z, 0.18f);
+        c[ImGuiCol_HeaderActive]    = ImVec4(accent.x, accent.y, accent.z, 0.24f);
+
+        style_init = true;
+    }
+
+    ImGui::SetNextWindowBgAlpha(0.94f);
+    ImGui::SetNextWindowPos(ImVec2(12, 12), ImGuiCond_FirstUseEver);
+    ImGuiWindowFlags wflags = ImGuiWindowFlags_NoTitleBar |
+                              ImGuiWindowFlags_NoCollapse |
+                              ImGuiWindowFlags_AlwaysAutoResize |
+                              ImGuiWindowFlags_NoSavedSettings;
+
+    if (!ImGui::Begin("overlay", nullptr, wflags))
+    {
+        ImGui::End();
+        ImGui::Render();
+        ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
+        return;
+    }
+
+    if (ImGui::BeginTabBar("tabs", ImGuiTabBarFlags_NoCloseWithMiddleMouseButton))
     {
         if (ImGui::BeginTabItem("main"))
         {
+            static bool auto_scroll = true;
+            static bool prev_wireframe = wireframe;
+
+            ImGui::BeginGroup();
             ImGui::Checkbox("clear screen", &enable_clear);
-            ImGui::SameLine();
-            ImGui::ColorEdit3("clear color", (float*)&clear_color);
-            ImGui::Checkbox("wireframe", &wireframe);
-            glPolygonMode(GL_FRONT_AND_BACK, wireframe ? GL_LINE : GL_FILL);
-            ImGui::Separator();
-            ImGui::Text("log (%zu)", log_lines.size());
-            if (ImGui::BeginChild("log", ImVec2(0, 100), true))
+            if (ImGui::Checkbox("wireframe", &wireframe))
             {
-                for (auto& l : log_lines)
-                    ImGui::TextUnformatted(l.c_str());
-                if (ImGui::GetScrollY() >= ImGui::GetScrollMaxY())
+                if (wireframe != prev_wireframe)
+                {
+                    glPolygonMode(GL_FRONT_AND_BACK, wireframe ? GL_LINE : GL_FILL);
+                    prev_wireframe = wireframe;
+                }
+            }
+            ImGui::EndGroup();
+
+            ImGui::SameLine();
+
+            ImGui::BeginGroup();
+            ImGui::ColorEdit3("clear color",
+                              (float*)&clear_color,
+                              ImGuiColorEditFlags_NoAlpha |
+                              ImGuiColorEditFlags_NoInputs |
+                              ImGuiColorEditFlags_DisplayRGB);
+            ImGui::EndGroup();
+
+            ImGui::SeparatorText("log");
+
+            const float log_h = 140.0f;
+            if (ImGui::BeginChild("log", ImVec2(0, log_h), true, ImGuiWindowFlags_AlwaysVerticalScrollbar | ImGuiWindowFlags_HorizontalScrollbar))
+            {
+                ImGuiListClipper clipper;
+                clipper.Begin((int)log_lines.size());
+                while (clipper.Step())
+                    for (int i = clipper.DisplayStart; i < clipper.DisplayEnd; ++i)
+                        ImGui::TextUnformatted(log_lines[(size_t)i].c_str());
+
+                if (auto_scroll && ImGui::GetScrollY() >= ImGui::GetScrollMaxY())
                     ImGui::SetScrollHereY(1.0f);
             }
             ImGui::EndChild();
-            if (ImGui::Button("clear log"))
-                log_lines.clear();
+
+            if (ImGui::SmallButton("clear log")) log_lines.clear();
             ImGui::SameLine();
-            if (ImGui::Button("exit"))
-                PostQuitMessage(0);
+            ImGui::Checkbox("auto-scroll", &auto_scroll);
+            ImGui::SameLine();
+            ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.85f, 0.20f, 0.20f, 0.80f));
+            ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.90f, 0.25f, 0.25f, 0.90f));
+            ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.80f, 0.15f, 0.15f, 1.00f));
+            if (ImGui::SmallButton("exit")) PostQuitMessage(0);
+            ImGui::PopStyleColor(3);
+
             ImGui::EndTabItem();
         }
+
         if (ImGui::BeginTabItem("hooks"))
         {
-            if (ImGui::BeginTable("hooks",
-                                  5,
-                                  ImGuiTableFlags_Borders |
-                                      ImGuiTableFlags_Resizable))
+            static ImGuiTextFilter filter;
+            filter.Draw("filter", 180.0f);
+
+            ImGuiTableFlags tflags = ImGuiTableFlags_Borders |
+                                     ImGuiTableFlags_Resizable |
+                                     ImGuiTableFlags_RowBg |
+                                     ImGuiTableFlags_ScrollY |
+                                     ImGuiTableFlags_Sortable |
+                                     ImGuiTableFlags_SizingStretchProp;
+            const float table_h = ImGui::GetTextLineHeightWithSpacing() * 10.0f +
+                                  ImGui::GetStyle().CellPadding.y * 2.0f;
+
+            if (ImGui::BeginTable("hooks_table", 5, tflags, ImVec2(0, table_h)))
             {
-                ImGui::TableSetupColumn("module");
+                ImGui::TableSetupColumn("module", ImGuiTableColumnFlags_DefaultSort);
                 ImGui::TableSetupColumn("function");
                 ImGui::TableSetupColumn("orig");
                 ImGui::TableSetupColumn("hook");
-                ImGui::TableSetupColumn("active");
+                ImGui::TableSetupColumn("active", ImGuiTableColumnFlags_PreferSortDescending);
                 ImGui::TableHeadersRow();
-                for (auto& h : g_hooks)
+
+                ImGuiTableSortSpecs* sort = ImGui::TableGetSortSpecs();
+                static std::vector<int> order;
+                order.resize((int)g_hooks.size());
+                for (int i = 0; i < (int)g_hooks.size(); ++i) order[i] = i;
+
+                if (sort && sort->SpecsCount > 0)
                 {
-                    ImGui::TableNextRow();
-                    ImGui::TableNextColumn();
-                    ImGui::Text("%s", h.module.c_str());
-                    ImGui::TableNextColumn();
-                    ImGui::Text("%s", h.function.c_str());
-                    ImGui::TableNextColumn();
-                    ImGui::Text("%p", h.original_addr);
-                    ImGui::TableNextColumn();
-                    ImGui::Text("%p", h.hook_addr);
-                    ImGui::TableNextColumn();
-                    ImGui::Text(h.active ? "yes" : "no");
+                    auto cmp = [&](int a, int b) {
+                        const auto& ha = g_hooks[(size_t)a];
+                        const auto& hb = g_hooks[(size_t)b];
+                        const ImGuiTableColumnSortSpecs& s = sort->Specs[0];
+                        const bool asc = (s.SortDirection == ImGuiSortDirection_Ascending);
+                        switch (s.ColumnIndex)
+                        {
+                            case 0: { int r = ha.module.compare(hb.module);   return asc ? r < 0 : r > 0; }
+                            case 1: { int r = ha.function.compare(hb.function); return asc ? r < 0 : r > 0; }
+                            case 2: { auto ra = (uintptr_t)ha.original_addr; auto rb = (uintptr_t)hb.original_addr; return asc ? (ra < rb) : (ra > rb); }
+                            case 3: { auto ra = (uintptr_t)ha.hook_addr;     auto rb = (uintptr_t)hb.hook_addr;     return asc ? (ra < rb) : (ra > rb); }
+                            case 4: { bool ra = ha.active, rb = hb.active; return asc ? (ra < rb) : (ra > rb); }
+                        }
+                        return false;
+                    };
+                    std::stable_sort(order.begin(), order.end(), cmp);
                 }
+
+                for (int idx : order)
+                {
+                    const auto& h = g_hooks[(size_t)idx];
+                    if (!filter.PassFilter(h.module.c_str()) &&
+                        !filter.PassFilter(h.function.c_str()))
+                        continue;
+
+                    ImGui::TableNextRow();
+                    ImGui::TableNextColumn(); ImGui::TextUnformatted(h.module.c_str());
+                    ImGui::TableNextColumn(); ImGui::TextUnformatted(h.function.c_str());
+                    ImGui::TableNextColumn(); ImGui::Text("%p", h.original_addr);
+                    ImGui::TableNextColumn(); ImGui::Text("%p", h.hook_addr);
+                    ImGui::TableNextColumn();
+                    if (h.active) ImGui::TextColored(ImVec4(0.20f,0.70f,0.30f,1.0f), "yes");
+                    else          ImGui::TextColored(ImVec4(0.70f,0.20f,0.20f,1.0f), "no");
+                }
+
                 ImGui::EndTable();
             }
+
             ImGui::EndTabItem();
         }
+
         ImGui::EndTabBar();
     }
+
     ImGui::End();
 
     ImGui::Render();
+
     if (enable_clear)
     {
-        glClearColor(
-            clear_color.x, clear_color.y, clear_color.z, clear_color.w);
+        glClearColor(clear_color.x, clear_color.y, clear_color.z, clear_color.w);
         glClear(GL_COLOR_BUFFER_BIT);
     }
+
     ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
 }
 
