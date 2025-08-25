@@ -9,7 +9,6 @@ set_target_properties(
                CXX_EXTENSIONS OFF
                POSITION_INDEPENDENT_CODE ON
                PREFIX "" # no "lib" prefix
-               WINDOWS_EXPORT_ALL_SYMBOLS OFF # we rely on .def
     )
 
 # static link so we ship no extra MinGW runtimes
@@ -21,17 +20,12 @@ target_link_options(
 
 target_link_libraries(bass PRIVATE imgui_opengl3 dwmapi)
 
-set(STEAM_PREFIX_PATH
-    "/home/e_gleba/.var/app/com.valvesoftware.Steam/data/Steam/steamapps/compatdata/2180100/pfx/drive_c/2.06"
-    )
+set(game_path "${CMAKE_CURRENT_LIST_DIR}/../../2.06")
 
-if(0)
-    add_custom_command(
-        TARGET bass
-        POST_BUILD
-        COMMAND
-            ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_FILE:bass>"
-            "${STEAM_PREFIX_PATH}/bass.dll"
-        COMMENT
-            "deploying bass.dll to steam proton prefix = ${STEAM_PREFIX_PATH}")
-endif()
+add_custom_command(
+    TARGET bass
+    POST_BUILD
+    COMMAND
+        ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_FILE:bass>"
+        "${game_path}/bass.dll"
+    COMMENT "deploying bass.dll to steam proton prefix = ${game_path}")
