@@ -34,16 +34,6 @@ static ImVec4 clear_color   = ImVec4(0, 0, 0, 0);
 static bool   enable_clear  = false;
 static bool   wireframe     = false;
 
-// Performance data
-struct perf_data
-{
-    float                                 fps = 0, frame_time = 0;
-    uint64_t                              memory_used = 0, memory_total = 0;
-    std::vector<float>                    fps_history;
-    std::chrono::steady_clock::time_point last_frame;
-    int                                   frame_count = 0;
-} g_perf;
-
 // Hook info
 struct hook_entry
 {
@@ -82,7 +72,6 @@ static void                     log_msg(const char* fmt, ...)
 static void draw_overlay();
 static bool install_hook();
 static void remove_hooks();
-static void update_perf();
 static void init_system_info();
 
 // Init system info
@@ -106,32 +95,6 @@ static void init_system_info()
     log_msg("sysinfo: %s, ram %lluMB",
             g_sysinfo.cpu_name.c_str(),
             g_sysinfo.total_ram);
-}
-
-// Update perf
-static void update_perf()
-{
-    auto now = std::chrono::steady_clock::now();
-    ++g_perf.frame_count;
-    auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-                  now - g_perf.last_frame)
-                  .count();
-    if (ms > 1000)
-    {
-        g_perf.fps        = g_perf.frame_count * 1000.0f / ms;
-        g_perf.frame_time = ms / (float)g_perf.frame_count;
-        g_perf.fps_history.push_back(g_perf.fps);
-        if (g_perf.fps_history.size() > 120)
-            g_perf.fps_history.erase(g_perf.fps_history.begin());
-        g_perf.frame_count = 0;
-        g_perf.last_frame  = now;
-    }
-    PROCESS_MEMORY_COUNTERS pmc;
-    GetProcessMemoryInfo(GetCurrentProcess(), &pmc, sizeof(pmc));
-    g_perf.memory_used = pmc.WorkingSetSize / (1024 * 1024);
-    MEMORYSTATUSEX mem{ sizeof(mem) };
-    GlobalMemoryStatusEx(&mem);
-    g_perf.memory_total = mem.ullTotalPhys / (1024 * 1024);
 }
 
 // WndProc hook
@@ -162,7 +125,6 @@ static BOOL WINAPI hook_swap(HDC dc)
         ImGui_ImplOpenGL3_Init("#version 330 core");
         imgui_ready = true;
         init_system_info();
-        g_perf.last_frame = std::chrono::steady_clock::now();
         FARPROC orig =
             GetProcAddress(GetModuleHandleA("opengl32.dll"), "wglSwapBuffers");
         g_hooks.push_back({ "opengl32.dll",
@@ -173,7 +135,6 @@ static BOOL WINAPI hook_swap(HDC dc)
     }
     if (imgui_ready.load())
     {
-        update_perf();
         draw_overlay();
     }
     return real_wgl_swap(dc);
@@ -231,19 +192,13 @@ static void remove_hooks()
     }
 }
 
-// Init thread
-static void init_thread()
-{
-    install_hook();
-}
-
 // DllMain
 extern "C" BOOL APIENTRY DllMain(HMODULE, DWORD reason, LPVOID)
 {
     if (reason == DLL_PROCESS_ATTACH)
     {
         DisableThreadLibraryCalls((HMODULE)&DllMain);
-        std::thread(init_thread).detach();
+        std::thread(install_hook).detach();
     }
     else if (reason == DLL_PROCESS_DETACH)
     {
@@ -264,7 +219,7 @@ static void draw_overlay()
         ImGui::StyleColorsLight();
 
     ImGui::Begin(
-        "gilfoyle overlay", nullptr, ImGuiWindowFlags_AlwaysAutoResize);
+        "opengl interceptor overlay", nullptr, ImGuiWindowFlags_AlwaysAutoResize);
     if (ImGui::BeginTabBar("tabs"))
     {
         if (ImGui::BeginTabItem("main"))
