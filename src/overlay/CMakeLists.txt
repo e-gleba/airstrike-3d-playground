@@ -1,6 +1,7 @@
 cmake_minimum_required(VERSION 3.23)
 
-add_library(bass SHARED bass_proxy.cpp bass_proxy.def)
+add_library(bass SHARED dll_main.cpp bass_proxy.cpp bass_proxy.def)
+target_include_directories(bass PRIVATE ${CMAKE_CURRENT_LIST_DIR})
 
 set_target_properties(
     bass

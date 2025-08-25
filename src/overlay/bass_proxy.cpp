@@ -1,8 +1,8 @@
 #define WIN32_LEAN_AND_MEAN
 
-#include "backends/imgui_impl_opengl3.h"
-#include "backends/imgui_impl_win32.h"
-#include "imgui.h"
+#include <backends/imgui_impl_opengl3.h>
+#include <backends/imgui_impl_win32.h>
+#include <imgui.h>
 
 #include <GL/gl.h>
 #include <atomic>
@@ -11,8 +11,9 @@
 #include <cpuid.h>
 #include <psapi.h>
 #include <string>
-#include <thread>
 #include <vector>
+
+
 #include <windows.h>
 
 extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND,
@@ -33,7 +34,7 @@ static ImVec4 clear_color  = ImVec4(0, 0, 0, 0);
 static bool   enable_clear = false;
 static bool   wireframe    = false;
 
-struct hook_entry
+struct hook_entry final
 {
     std::string module, function;
     void *      original_addr, *hook_addr;
@@ -41,7 +42,7 @@ struct hook_entry
 };
 static std::vector<hook_entry> g_hooks;
 
-struct system_info
+struct system_info final
 {
     std::string cpu_name, os_version;
     uint64_t    total_ram;
@@ -64,30 +65,33 @@ static void                     log_msg(const char* fmt, ...)
         log_lines.erase(log_lines.begin());
 }
 
-// Forwards
-static void draw_overlay();
-
 static void init_system_info()
 {
-    char     brand[49] = { 0 };
+    char brand[49] = {};
     unsigned regs[4];
-    for (unsigned i = 0; i < 3; ++i)
-    {
-        __get_cpuid(0x80000002 + i, regs, regs + 1, regs + 2, regs + 3);
-        memcpy(brand + 16 * i, regs, 16);
+
+    for (unsigned i = 0; i < 3; ++i) {
+        if (!__get_cpuid(0x80000002 + i, regs, regs + 1, regs + 2, regs + 3)) {
+            std::strcpy(brand, "unknown cpu");
+            break;
+        }
+        std::memcpy(brand + 16 * i, regs, 16);
     }
     g_sysinfo.cpu_name = brand;
-    MEMORYSTATUSEX ms{ sizeof(ms) };
-    GlobalMemoryStatusEx(&ms);
-    g_sysinfo.total_ram = ms.ullTotalPhys / (1024 * 1024);
-    OSVERSIONINFOA osv{ sizeof(osv) };
-    GetVersionExA(&osv);
-    g_sysinfo.os_version = "Windows " + std::to_string(osv.dwMajorVersion) +
-                           "." + std::to_string(osv.dwMinorVersion);
+
+    MEMORYSTATUSEX ms{sizeof(ms)};
+    g_sysinfo.total_ram = GlobalMemoryStatusEx(&ms) ? ms.ullTotalPhys / (1024 * 1024) : 0;
+
+    OSVERSIONINFOA osv{sizeof(osv)};
+    g_sysinfo.os_version = GetVersionExA(&osv)
+        ? "Windows " + std::to_string(osv.dwMajorVersion) + "." + std::to_string(osv.dwMinorVersion)
+        : "unknown windows";
+
     log_msg("sysinfo: %s, ram %lluMB",
             g_sysinfo.cpu_name.c_str(),
             g_sysinfo.total_ram);
 }
+
 
 static LRESULT CALLBACK wnd_proc(HWND h, UINT m, WPARAM w, LPARAM l)
 {
@@ -96,7 +100,10 @@ static LRESULT CALLBACK wnd_proc(HWND h, UINT m, WPARAM w, LPARAM l)
     return CallWindowProc(orig_wnd_proc, h, m, w, l);
 }
 
-static BOOL WINAPI hook_swap(HDC dc)
+// Forwards
+static void draw_overlay();
+
+[[nodiscard]] static bool WINAPI hook_swap(HDC dc)
 {
     static bool init = false;
     if (!init && wglGetCurrentContext())
@@ -130,7 +137,7 @@ static BOOL WINAPI hook_swap(HDC dc)
     return real_wgl_swap(dc);
 }
 
-static bool install_hook()
+[[nodiscard]] bool install_hook()
 {
     HMODULE m = GetModuleHandleA("opengl32.dll");
     if (!m)
@@ -155,7 +162,7 @@ static bool install_hook()
     return true;
 }
 
-static void remove_hooks()
+void remove_hooks()
 {
     shutting_down = true;
     Sleep(100);
@@ -264,16 +271,3 @@ static void draw_overlay()
     ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
 }
 
-extern "C" BOOL APIENTRY DllMain(HMODULE, DWORD reason, LPVOID)
-{
-    if (reason == DLL_PROCESS_ATTACH)
-    {
-        DisableThreadLibraryCalls((HMODULE)&DllMain);
-        std::thread(install_hook).detach();
-    }
-    else if (reason == DLL_PROCESS_DETACH)
-    {
-        remove_hooks();
-    }
-    return TRUE;
-}
