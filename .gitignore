@@ -132,4 +132,4 @@ __pycache__
 *.app
 
 !2.06/**
-!dumps/**
+!ghidra/dumps/**
