@@ -3,35 +3,27 @@ cpmaddpackage(
     NAME
     imgui
     VERSION
-    1.91.9
+    1.92.2
     GITHUB_REPOSITORY
     ocornut/imgui
     DOWNLOAD_ONLY
-    TRUE
-)
+    TRUE)
 
 add_library(imgui STATIC)
 
 target_sources(
     imgui
-    PRIVATE
-        ${imgui_SOURCE_DIR}/imgui.cpp
-        ${imgui_SOURCE_DIR}/imgui_demo.cpp
-        ${imgui_SOURCE_DIR}/imgui_draw.cpp
-        ${imgui_SOURCE_DIR}/imgui_tables.cpp
-        ${imgui_SOURCE_DIR}/imgui_widgets.cpp
-        ${imgui_SOURCE_DIR}/misc/cpp/imgui_stdlib.cpp
-        ${imgui_SOURCE_DIR}/misc/freetype/imgui_freetype.cpp
-)
+    PRIVATE ${imgui_SOURCE_DIR}/imgui.cpp
+            ${imgui_SOURCE_DIR}/imgui_demo.cpp
+            ${imgui_SOURCE_DIR}/imgui_draw.cpp
+            ${imgui_SOURCE_DIR}/imgui_tables.cpp
+            ${imgui_SOURCE_DIR}/imgui_widgets.cpp
+            ${imgui_SOURCE_DIR}/misc/cpp/imgui_stdlib.cpp
+            ${imgui_SOURCE_DIR}/misc/freetype/imgui_freetype.cpp)
 
 target_include_directories(
-    imgui
-    SYSTEM
-    PUBLIC
-        ${imgui_SOURCE_DIR}
-        ${imgui_SOURCE_DIR}/misc/cpp
-        ${imgui_SOURCE_DIR}/misc/freetype
-)
+    imgui SYSTEM PUBLIC ${imgui_SOURCE_DIR} ${imgui_SOURCE_DIR}/misc/cpp
+                        ${imgui_SOURCE_DIR}/misc/freetype)
 
 target_link_libraries(imgui PRIVATE freetype)
 
@@ -46,10 +38,9 @@ target_link_libraries(imgui PRIVATE freetype)
 add_library(imgui_opengl3 STATIC)
 
 target_sources(
-    imgui_opengl3
-    PRIVATE
-    ${imgui_SOURCE_DIR}/backends/imgui_impl_win32.cpp
-            ${imgui_SOURCE_DIR}/backends/imgui_impl_opengl3.cpp
-)
+    imgui_opengl3 PRIVATE ${imgui_SOURCE_DIR}/backends/imgui_impl_win32.cpp
+                          ${imgui_SOURCE_DIR}/backends/imgui_impl_opengl3.cpp)
+
+target_include_directories(imgui_opengl3 PUBLIC ${imgui_SOURCE_DIR}/backends)
 
 target_link_libraries(imgui_opengl3 PUBLIC imgui glad opengl32)
