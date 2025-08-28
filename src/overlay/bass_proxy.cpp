@@ -1,75 +1,87 @@
 #define WIN32_LEAN_AND_MEAN
 #include "bass_proxy.hpp"
-#include <imgui.h>
-#include <imgui_impl_opengl3.h>
-#include <imgui_impl_win32.h>
 #include <GL/gl.h>
 #include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <cstdarg>
 #include <cstdio>
+#include <imgui.h>
+#include <imgui_impl_opengl3.h>
+#include <imgui_impl_win32.h>
+#include <psapi.h>
 #include <string>
 #include <vector>
 #include <windows.h>
-#include <psapi.h>
 
-extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND, UINT, WPARAM, LPARAM);
+extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(HWND,
+                                                             UINT,
+                                                             WPARAM,
+                                                             LPARAM);
 
 using wgl_swap_t = BOOL(WINAPI*)(HDC);
 
-static wgl_swap_t real_wgl_swap = nullptr;
-static HWND game_window = nullptr;
-static WNDPROC orig_wnd_proc = nullptr;
-static std::atomic<bool> imgui_ready = false;
+static wgl_swap_t        real_wgl_swap = nullptr;
+static HWND              game_window   = nullptr;
+static WNDPROC           orig_wnd_proc = nullptr;
+static std::atomic<bool> imgui_ready   = false;
 static std::atomic<bool> shutting_down = false;
-static BYTE original_bytes[5];
-static bool dark_theme = true;
-static ImVec4 clear_color = ImVec4(0, 0, 0, 0);
-static bool enable_clear = false;
-static bool wireframe = false;
+static BYTE              original_bytes[5];
+static bool              dark_theme   = true;
+static ImVec4            clear_color  = ImVec4(0, 0, 0, 0);
+static bool              enable_clear = false;
+static bool              wireframe    = false;
 
-struct hook_entry final {
+struct hook_entry final
+{
     std::string module, function;
-    void* original_addr, *hook_addr;
-    bool active;
+    void *      original_addr, *hook_addr;
+    bool        active;
 };
 
 static std::vector<hook_entry> g_hooks;
 
 // minimalist log buffer - based on imgui console example
-struct console_buffer {
+struct console_buffer
+{
     ImGuiTextBuffer buf;
     ImGuiTextFilter filter;
-    ImVector<int> line_offsets;
-    bool auto_scroll = true;
+    ImVector<int>   line_offsets;
+    bool            auto_scroll = true;
 
-    void clear() {
+    void clear()
+    {
         buf.clear();
         line_offsets.clear();
         line_offsets.push_back(0);
     }
 
-    void add_log(const char* fmt, ...) IM_FMTARGS(2) {
-        int old_size = buf.size();
+    void add_log(const char* fmt, ...) IM_FMTARGS(2)
+    {
+        int     old_size = buf.size();
         va_list args;
         va_start(args, fmt);
         buf.appendfv(fmt, args);
         va_end(args);
-        for (int new_size = buf.size(); old_size < new_size; old_size++) {
-            if (buf[old_size] == '\n') {
+        for (int new_size = buf.size(); old_size < new_size; old_size++)
+        {
+            if (buf[old_size] == '\n')
+            {
                 line_offsets.push_back(old_size + 1);
             }
         }
     }
 
-    void draw() {
-        if (ImGui::BeginPopup("options")) {
+    void draw()
+    {
+        if (ImGui::BeginPopup("options"))
+        {
             ImGui::Checkbox("auto-scroll", &auto_scroll);
             ImGui::EndPopup();
         }
 
-        if (ImGui::Button("options")) {
+        if (ImGui::Button("options"))
+        {
             ImGui::OpenPopup("options");
         }
         ImGui::SameLine();
@@ -83,37 +95,55 @@ struct console_buffer {
         filter.Draw("filter", -100.0f);
         ImGui::Separator();
 
-        if (ImGui::BeginChild("scrolling", ImVec2(0, 0), false, ImGuiWindowFlags_HorizontalScrollbar)) {
-            if (clear_pressed) {
+        if (ImGui::BeginChild("scrolling",
+                              ImVec2(0, 0),
+                              false,
+                              ImGuiWindowFlags_HorizontalScrollbar))
+        {
+            if (clear_pressed)
+            {
                 clear();
             }
-            if (copy) {
+            if (copy)
+            {
                 ImGui::LogToClipboard();
             }
 
             ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(0, 0));
             const char* buf_begin = buf.begin();
-            const char* buf_end = buf.end();
+            const char* buf_end   = buf.end();
 
-            if (filter.IsActive()) {
-                for (int line_no = 0; line_no < line_offsets.Size; line_no++) {
+            if (filter.IsActive())
+            {
+                for (int line_no = 0; line_no < line_offsets.Size; line_no++)
+                {
                     const char* line_start = buf_begin + line_offsets[line_no];
-                    const char* line_end = (line_no + 1 < line_offsets.Size)
-                        ? (buf_begin + line_offsets[line_no + 1] - 1)
-                        : buf_end;
-                    if (filter.PassFilter(line_start, line_end)) {
+                    const char* line_end =
+                        (line_no + 1 < line_offsets.Size)
+                            ? (buf_begin + line_offsets[line_no + 1] - 1)
+                            : buf_end;
+                    if (filter.PassFilter(line_start, line_end))
+                    {
                         ImGui::TextUnformatted(line_start, line_end);
                     }
                 }
-            } else {
+            }
+            else
+            {
                 ImGuiListClipper clipper;
                 clipper.Begin(line_offsets.Size);
-                while (clipper.Step()) {
-                    for (int line_no = clipper.DisplayStart; line_no < clipper.DisplayEnd; line_no++) {
-                        const char* line_start = buf_begin + line_offsets[line_no];
-                        const char* line_end = (line_no + 1 < line_offsets.Size)
-                            ? (buf_begin + line_offsets[line_no + 1] - 1)
-                            : buf_end;
+                while (clipper.Step())
+                {
+                    for (int line_no = clipper.DisplayStart;
+                         line_no < clipper.DisplayEnd;
+                         line_no++)
+                    {
+                        const char* line_start =
+                            buf_begin + line_offsets[line_no];
+                        const char* line_end =
+                            (line_no + 1 < line_offsets.Size)
+                                ? (buf_begin + line_offsets[line_no + 1] - 1)
+                                : buf_end;
                         ImGui::TextUnformatted(line_start, line_end);
                     }
                 }
@@ -122,7 +152,8 @@ struct console_buffer {
 
             ImGui::PopStyleVar();
 
-            if (auto_scroll && ImGui::GetScrollY() >= ImGui::GetScrollMaxY()) {
+            if (auto_scroll && ImGui::GetScrollY() >= ImGui::GetScrollMaxY())
+            {
                 ImGui::SetScrollHereY(1.0f);
             }
         }
@@ -132,16 +163,21 @@ struct console_buffer {
 
 static console_buffer console;
 
-static void log_msg(const char* fmt, ...) {
-    const auto now = std::chrono::system_clock::now();
+static void log_msg(const char* fmt, ...)
+{
+    const auto now    = std::chrono::system_clock::now();
     const auto time_t = std::chrono::system_clock::to_time_t(now);
-    const auto tm = *std::localtime(&time_t);
+    const auto tm     = *std::localtime(&time_t);
 
     char timestamp[32];
-    std::snprintf(timestamp, sizeof(timestamp), "[%02d:%02d:%02d] ",
-                  tm.tm_hour, tm.tm_min, tm.tm_sec);
+    std::snprintf(timestamp,
+                  sizeof(timestamp),
+                  "[%02d:%02d:%02d] ",
+                  tm.tm_hour,
+                  tm.tm_min,
+                  tm.tm_sec);
 
-    char buffer[1024];
+    char    buffer[1024];
     va_list args;
     va_start(args, fmt);
     std::vsnprintf(buffer, sizeof(buffer), fmt, args);
@@ -150,35 +186,47 @@ static void log_msg(const char* fmt, ...) {
     console.add_log("%s%s\n", timestamp, buffer);
 }
 
-static void report_winapi_error(const char* operation, DWORD error_code) {
+static void report_winapi_error(const char* operation, DWORD error_code)
+{
     LPSTR message_buffer = nullptr;
 
     const DWORD format_result = FormatMessageA(
-        FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS,
-        nullptr, error_code, MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
-        reinterpret_cast<LPSTR>(&message_buffer), 0, nullptr
-    );
+        FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM |
+            FORMAT_MESSAGE_IGNORE_INSERTS,
+        nullptr,
+        error_code,
+        MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
+        reinterpret_cast<LPSTR>(&message_buffer),
+        0,
+        nullptr);
 
-    if (format_result && message_buffer) {
+    if (format_result && message_buffer)
+    {
         log_msg("error: %s: %s (%lu)", operation, message_buffer, error_code);
         LocalFree(message_buffer);
-    } else {
-        log_msg("error: %s: error code %lu (format failed)", operation, error_code);
+    }
+    else
+    {
+        log_msg(
+            "error: %s: error code %lu (format failed)", operation, error_code);
     }
 }
 
-struct system_info final {
+struct system_info final
+{
     std::string cpu_arch, os_version;
-    uint64_t total_ram;
+    uint64_t    total_ram;
 } g_sysinfo;
 
-static void init_system_info() {
+static void init_system_info()
+{
     log_msg("initializing system info...");
 
     SYSTEM_INFO si;
     GetSystemInfo(&si);
 
-    switch (si.wProcessorArchitecture) {
+    switch (si.wProcessorArchitecture)
+    {
         case PROCESSOR_ARCHITECTURE_AMD64:
             g_sysinfo.cpu_arch = "x64";
             break;
@@ -197,12 +245,15 @@ static void init_system_info() {
     log_msg("page size: %lu bytes", si.dwPageSize);
 
     MEMORYSTATUSEX ms{ sizeof(ms) };
-    if (GlobalMemoryStatusEx(&ms)) {
+    if (GlobalMemoryStatusEx(&ms))
+    {
         g_sysinfo.total_ram = ms.ullTotalPhys / (1024 * 1024);
         log_msg("total ram: %lluMB", g_sysinfo.total_ram);
         log_msg("available ram: %lluMB", ms.ullAvailPhys / (1024 * 1024));
         log_msg("memory load: %lu%%", ms.dwMemoryLoad);
-    } else {
+    }
+    else
+    {
         report_winapi_error("GlobalMemoryStatusEx", GetLastError());
         g_sysinfo.total_ram = 0;
     }
@@ -210,26 +261,32 @@ static void init_system_info() {
     g_sysinfo.os_version = "Windows";
 
     // get process info
-    HANDLE process = GetCurrentProcess();
+    HANDLE                  process = GetCurrentProcess();
     PROCESS_MEMORY_COUNTERS pmc;
-    if (GetProcessMemoryInfo(process, &pmc, sizeof(pmc))) {
-        log_msg("process working set: %luMB", pmc.WorkingSetSize / (1024 * 1024));
-        log_msg("process peak working set: %luMB", pmc.PeakWorkingSetSize / (1024 * 1024));
+    if (GetProcessMemoryInfo(process, &pmc, sizeof(pmc)))
+    {
+        log_msg("process working set: %luMB",
+                pmc.WorkingSetSize / (1024 * 1024));
+        log_msg("process peak working set: %luMB",
+                pmc.PeakWorkingSetSize / (1024 * 1024));
     }
 
     DWORD process_id = GetCurrentProcessId();
     log_msg("process id: %lu", process_id);
 
     char module_path[MAX_PATH];
-    if (GetModuleFileNameA(nullptr, module_path, MAX_PATH)) {
+    if (GetModuleFileNameA(nullptr, module_path, MAX_PATH))
+    {
         log_msg("module path: %s", module_path);
     }
 
     log_msg("system info initialized");
 }
 
-static LRESULT CALLBACK wnd_proc(HWND h, UINT m, WPARAM w, LPARAM l) {
-    if (!shutting_down.load()) {
+static LRESULT CALLBACK wnd_proc(HWND h, UINT m, WPARAM w, LPARAM l)
+{
+    if (!shutting_down.load())
+    {
         ImGui_ImplWin32_WndProcHandler(h, m, w, l);
     }
     return CallWindowProc(orig_wnd_proc, h, m, w, l);
@@ -237,122 +294,158 @@ static LRESULT CALLBACK wnd_proc(HWND h, UINT m, WPARAM w, LPARAM l) {
 
 static void draw_overlay();
 
-[[nodiscard]] static bool WINAPI hook_swap(HDC dc) {
+[[nodiscard]] static bool WINAPI hook_swap(HDC dc)
+{
     static bool init = false;
 
-    if (!init && wglGetCurrentContext()) {
+    if (!init && wglGetCurrentContext())
+    {
         log_msg("initializing opengl hook...");
 
         GLint viewport[4];
         glGetIntegerv(GL_VIEWPORT, viewport);
-        log_msg("opengl viewport: %dx%d at (%d,%d)", viewport[2], viewport[3], viewport[0], viewport[1]);
+        log_msg("opengl viewport: %dx%d at (%d,%d)",
+                viewport[2],
+                viewport[3],
+                viewport[0],
+                viewport[1]);
 
-        const char* gl_version = reinterpret_cast<const char*>(glGetString(GL_VERSION));
-        const char* gl_vendor = reinterpret_cast<const char*>(glGetString(GL_VENDOR));
-        const char* gl_renderer = reinterpret_cast<const char*>(glGetString(GL_RENDERER));
+        const char* gl_version =
+            reinterpret_cast<const char*>(glGetString(GL_VERSION));
+        const char* gl_vendor =
+            reinterpret_cast<const char*>(glGetString(GL_VENDOR));
+        const char* gl_renderer =
+            reinterpret_cast<const char*>(glGetString(GL_RENDERER));
 
-        if (gl_version) log_msg("opengl version: %s", gl_version);
-        if (gl_vendor) log_msg("opengl vendor: %s", gl_vendor);
-        if (gl_renderer) log_msg("opengl renderer: %s", gl_renderer);
+        if (gl_version)
+            log_msg("opengl version: %s", gl_version);
+        if (gl_vendor)
+            log_msg("opengl vendor: %s", gl_vendor);
+        if (gl_renderer)
+            log_msg("opengl renderer: %s", gl_renderer);
 
         game_window = WindowFromDC(wglGetCurrentDC());
-        if (!game_window) {
+        if (!game_window)
+        {
             log_msg("error: WindowFromDC failed");
             return real_wgl_swap(dc);
         }
 
         RECT window_rect;
-        if (GetWindowRect(game_window, &window_rect)) {
+        if (GetWindowRect(game_window, &window_rect))
+        {
             log_msg("window rect: %ldx%ld at (%ld,%ld)",
-                   window_rect.right - window_rect.left,
-                   window_rect.bottom - window_rect.top,
-                   window_rect.left, window_rect.top);
+                    window_rect.right - window_rect.left,
+                    window_rect.bottom - window_rect.top,
+                    window_rect.left,
+                    window_rect.top);
         }
 
         char window_title[256];
-        if (GetWindowTextA(game_window, window_title, sizeof(window_title))) {
+        if (GetWindowTextA(game_window, window_title, sizeof(window_title)))
+        {
             log_msg("window title: %s", window_title);
         }
 
         orig_wnd_proc = reinterpret_cast<WNDPROC>(SetWindowLongPtrA(
             game_window, GWLP_WNDPROC, reinterpret_cast<LONG_PTR>(wnd_proc)));
 
-        if (!orig_wnd_proc) {
+        if (!orig_wnd_proc)
+        {
             report_winapi_error("SetWindowLongPtrA", GetLastError());
-        } else {
+        }
+        else
+        {
             log_msg("hooked window procedure at %p", orig_wnd_proc);
         }
 
         init = true;
     }
 
-    if (init && !imgui_ready.load()) {
+    if (init && !imgui_ready.load())
+    {
         log_msg("initializing imgui...");
 
         ImGui::CreateContext();
-        ImGuiIO& io = ImGui::GetIO();
+        ImGuiIO& io        = ImGui::GetIO();
         io.FontGlobalScale = 1.2f;
         log_msg("imgui context created");
 
-        if (!ImGui_ImplWin32_Init(game_window)) {
+        if (!ImGui_ImplWin32_Init(game_window))
+        {
             log_msg("error: ImGui_ImplWin32_Init failed");
-        } else {
+        }
+        else
+        {
             log_msg("imgui win32 backend initialized");
 
-            if (!ImGui_ImplOpenGL3_Init("#version 330 core")) {
+            if (!ImGui_ImplOpenGL3_Init("#version 330 core"))
+            {
                 log_msg("error: ImGui_ImplOpenGL3_Init failed");
-            } else {
+            }
+            else
+            {
                 log_msg("imgui opengl3 backend initialized");
                 imgui_ready = true;
 
                 init_system_info();
 
-                const FARPROC orig = GetProcAddress(GetModuleHandleA("opengl32.dll"), "wglSwapBuffers");
-                if (orig) {
-                    g_hooks.push_back({
-                        "opengl32.dll",
-                        "wglSwapBuffers",
-                        reinterpret_cast<void*>(orig),
-                        reinterpret_cast<void*>(hook_swap),
-                        true
-                    });
+                const FARPROC orig = GetProcAddress(
+                    GetModuleHandleA("opengl32.dll"), "wglSwapBuffers");
+                if (orig)
+                {
+                    g_hooks.push_back({ "opengl32.dll",
+                                        "wglSwapBuffers",
+                                        reinterpret_cast<void*>(orig),
+                                        reinterpret_cast<void*>(hook_swap),
+                                        true });
                     log_msg("registered hook: wglSwapBuffers at %p", orig);
                 }
             }
         }
     }
 
-    if (imgui_ready.load()) {
+    if (imgui_ready.load())
+    {
         draw_overlay();
     }
 
     return real_wgl_swap(dc);
 }
 
-[[nodiscard]] bool install_hook() {
+[[nodiscard]] bool install_hook()
+{
     log_msg("bass proxy dll loaded");
     log_msg("installing opengl hook...");
 
     const HMODULE opengl_module = GetModuleHandleA("opengl32.dll");
-    if (!opengl_module) {
+    if (!opengl_module)
+    {
         report_winapi_error("GetModuleHandleA(opengl32.dll)", GetLastError());
         return false;
     }
 
     log_msg("opengl32.dll module handle: %p", opengl_module);
 
-    auto target_addr = reinterpret_cast<BYTE*>(GetProcAddress(opengl_module, "wglSwapBuffers"));
-    if (!target_addr) {
+    auto target_addr = reinterpret_cast<BYTE*>(
+        GetProcAddress(opengl_module, "wglSwapBuffers"));
+    if (!target_addr)
+    {
         report_winapi_error("GetProcAddress(wglSwapBuffers)", GetLastError());
         return false;
     }
 
     log_msg("wglSwapBuffers target address: %p", target_addr);
     log_msg("original bytes: %02x %02x %02x %02x %02x",
-           target_addr[0], target_addr[1], target_addr[2], target_addr[3], target_addr[4]);
+            target_addr[0],
+            target_addr[1],
+            target_addr[2],
+            target_addr[3],
+            target_addr[4]);
 
     DWORD old_protect;
-    if (!VirtualProtect(target_addr, 5, PAGE_EXECUTE_READWRITE, &old_protect)) {
+    if (!VirtualProtect(target_addr, 5, PAGE_EXECUTE_READWRITE, &old_protect))
+    {
         report_winapi_error("VirtualProtect", GetLastError());
         return false;
     }
@@ -361,23 +454,28 @@ static void draw_overlay();
 
     std::memcpy(original_bytes, target_addr, 5);
 
-    const intptr_t rel_offset = reinterpret_cast<BYTE*>(hook_swap) - (target_addr + 5);
+    const intptr_t rel_offset =
+        reinterpret_cast<BYTE*>(hook_swap) - (target_addr + 5);
     target_addr[0] = 0xE9;
     std::memcpy(target_addr + 1, &rel_offset, 4);
 
     log_msg("installed jump instruction, relative offset: 0x%tx", rel_offset);
 
     DWORD dummy;
-    if (!VirtualProtect(target_addr, 5, old_protect, &dummy)) {
+    if (!VirtualProtect(target_addr, 5, old_protect, &dummy))
+    {
         report_winapi_error("VirtualProtect restore", GetLastError());
-    } else {
+    }
+    else
+    {
         log_msg("memory protection restored");
     }
 
     auto trampoline = reinterpret_cast<BYTE*>(VirtualAlloc(
         nullptr, 16, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE));
 
-    if (!trampoline) {
+    if (!trampoline)
+    {
         report_winapi_error("VirtualAlloc", GetLastError());
         return false;
     }
@@ -398,21 +496,30 @@ static void draw_overlay();
     return true;
 }
 
-void remove_hooks() {
+void remove_hooks()
+{
     log_msg("cleanup started");
     shutting_down = true;
 
-    if (orig_wnd_proc && game_window) {
-        SetWindowLongPtrA(game_window, GWLP_WNDPROC, reinterpret_cast<LONG_PTR>(orig_wnd_proc));
+    if (orig_wnd_proc && game_window)
+    {
+        SetWindowLongPtrA(game_window,
+                          GWLP_WNDPROC,
+                          reinterpret_cast<LONG_PTR>(orig_wnd_proc));
         log_msg("window procedure restored");
     }
 
     const HMODULE opengl_module = GetModuleHandleA("opengl32.dll");
-    if (opengl_module) {
-        auto target_addr = reinterpret_cast<BYTE*>(GetProcAddress(opengl_module, "wglSwapBuffers"));
-        if (target_addr) {
+    if (opengl_module)
+    {
+        auto target_addr = reinterpret_cast<BYTE*>(
+            GetProcAddress(opengl_module, "wglSwapBuffers"));
+        if (target_addr)
+        {
             DWORD old_protect, dummy;
-            if (VirtualProtect(target_addr, 5, PAGE_EXECUTE_READWRITE, &old_protect)) {
+            if (VirtualProtect(
+                    target_addr, 5, PAGE_EXECUTE_READWRITE, &old_protect))
+            {
                 std::memcpy(target_addr, original_bytes, 5);
                 VirtualProtect(target_addr, 5, old_protect, &dummy);
                 log_msg("original bytes restored");
@@ -420,15 +527,21 @@ void remove_hooks() {
         }
     }
 
-    if (real_wgl_swap) {
-        if (!VirtualFree(reinterpret_cast<LPVOID>(real_wgl_swap), 0, MEM_RELEASE)) {
+    if (real_wgl_swap)
+    {
+        if (!VirtualFree(
+                reinterpret_cast<LPVOID>(real_wgl_swap), 0, MEM_RELEASE))
+        {
             report_winapi_error("VirtualFree", GetLastError());
-        } else {
+        }
+        else
+        {
             log_msg("trampoline memory freed");
         }
     }
 
-    if (imgui_ready.load()) {
+    if (imgui_ready.load())
+    {
         ImGui_ImplOpenGL3_Shutdown();
         ImGui_ImplWin32_Shutdown();
         ImGui::DestroyContext();
@@ -438,8 +551,10 @@ void remove_hooks() {
     log_msg("cleanup completed");
 }
 
-static void draw_overlay() {
-    if (!ImGui::GetCurrentContext()) return;
+static void draw_overlay()
+{
+    if (!ImGui::GetCurrentContext())
+        return;
 
     ImGui_ImplOpenGL3_NewFrame();
     ImGui_ImplWin32_NewFrame();
@@ -447,15 +562,16 @@ static void draw_overlay() {
 
     // minimal dark theme
     static bool style_init = false;
-    if (!style_init) {
+    if (!style_init)
+    {
         ImGui::StyleColorsDark();
-        auto& style = ImGui::GetStyle();
+        auto& style          = ImGui::GetStyle();
         style.WindowRounding = 6.0f;
-        style.FrameRounding = 4.0f;
-        style.WindowPadding = ImVec2(8, 8);
-        style.FramePadding = ImVec2(6, 4);
-        style.ItemSpacing = ImVec2(6, 4);
-        style_init = true;
+        style.FrameRounding  = 4.0f;
+        style.WindowPadding  = ImVec2(8, 8);
+        style.FramePadding   = ImVec2(6, 4);
+        style.ItemSpacing    = ImVec2(6, 4);
+        style_init           = true;
         log_msg("imgui style initialized");
     }
 
@@ -463,26 +579,36 @@ static void draw_overlay() {
     ImGui::SetNextWindowPos(ImVec2(10, 10), ImGuiCond_FirstUseEver);
     ImGui::SetNextWindowSize(ImVec2(600, 450), ImGuiCond_FirstUseEver);
 
-    if (ImGui::Begin("bass proxy overlay", nullptr)) {
-        if (ImGui::BeginTabBar("main_tabs")) {
-            if (ImGui::BeginTabItem("console")) {
+    if (ImGui::Begin("bass proxy overlay", nullptr))
+    {
+        if (ImGui::BeginTabBar("main_tabs"))
+        {
+            if (ImGui::BeginTabItem("console"))
+            {
                 console.draw();
                 ImGui::EndTabItem();
             }
 
-            if (ImGui::BeginTabItem("render")) {
+            if (ImGui::BeginTabItem("render"))
+            {
                 static bool prev_wireframe = wireframe;
 
                 ImGui::Checkbox("clear screen", &enable_clear);
                 ImGui::SameLine();
-                ImGui::ColorEdit3("clear color", reinterpret_cast<float*>(&clear_color),
-                                ImGuiColorEditFlags_NoInputs | ImGuiColorEditFlags_DisplayRGB);
+                ImGui::ColorEdit3("clear color",
+                                  reinterpret_cast<float*>(&clear_color),
+                                  ImGuiColorEditFlags_NoInputs |
+                                      ImGuiColorEditFlags_DisplayRGB);
 
-                if (ImGui::Checkbox("wireframe", &wireframe)) {
-                    if (wireframe != prev_wireframe) {
-                        glPolygonMode(GL_FRONT_AND_BACK, wireframe ? GL_LINE : GL_FILL);
+                if (ImGui::Checkbox("wireframe", &wireframe))
+                {
+                    if (wireframe != prev_wireframe)
+                    {
+                        glPolygonMode(GL_FRONT_AND_BACK,
+                                      wireframe ? GL_LINE : GL_FILL);
                         prev_wireframe = wireframe;
-                        log_msg("wireframe mode: %s", wireframe ? "enabled" : "disabled");
+                        log_msg("wireframe mode: %s",
+                                wireframe ? "enabled" : "disabled");
                     }
                 }
 
@@ -492,11 +618,16 @@ static void draw_overlay() {
 
                 GLint viewport[4];
                 glGetIntegerv(GL_VIEWPORT, viewport);
-                ImGui::Text("viewport: %dx%d at (%d,%d)", viewport[2], viewport[3], viewport[0], viewport[1]);
+                ImGui::Text("viewport: %dx%d at (%d,%d)",
+                            viewport[2],
+                            viewport[3],
+                            viewport[0],
+                            viewport[1]);
 
                 GLboolean depth_test;
                 glGetBooleanv(GL_DEPTH_TEST, &depth_test);
-                ImGui::Text("depth test: %s", depth_test ? "enabled" : "disabled");
+                ImGui::Text("depth test: %s",
+                            depth_test ? "enabled" : "disabled");
 
                 GLboolean blend;
                 glGetBooleanv(GL_BLEND, &blend);
@@ -505,12 +636,17 @@ static void draw_overlay() {
                 ImGui::EndTabItem();
             }
 
-            if (ImGui::BeginTabItem("hooks")) {
+            if (ImGui::BeginTabItem("hooks"))
+            {
                 static ImGuiTextFilter filter;
                 filter.Draw("filter", -100.0f);
 
-                if (ImGui::BeginTable("hooks_table", 4,
-                    ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg | ImGuiTableFlags_ScrollY)) {
+                if (ImGui::BeginTable("hooks_table",
+                                      4,
+                                      ImGuiTableFlags_Borders |
+                                          ImGuiTableFlags_RowBg |
+                                          ImGuiTableFlags_ScrollY))
+                {
 
                     ImGui::TableSetupColumn("module");
                     ImGui::TableSetupColumn("function");
@@ -518,9 +654,11 @@ static void draw_overlay() {
                     ImGui::TableSetupColumn("status");
                     ImGui::TableHeadersRow();
 
-                    for (const auto& hook : g_hooks) {
+                    for (const auto& hook : g_hooks)
+                    {
                         if (!filter.PassFilter(hook.module.c_str()) &&
-                            !filter.PassFilter(hook.function.c_str())) {
+                            !filter.PassFilter(hook.function.c_str()))
+                        {
                             continue;
                         }
 
@@ -533,10 +671,15 @@ static void draw_overlay() {
                         ImGui::Text("%p", hook.original_addr);
                         ImGui::TableNextColumn();
 
-                        if (hook.active) {
-                            ImGui::TextColored(ImVec4(0.2f, 0.8f, 0.3f, 1.0f), "active");
-                        } else {
-                            ImGui::TextColored(ImVec4(0.8f, 0.2f, 0.2f, 1.0f), "inactive");
+                        if (hook.active)
+                        {
+                            ImGui::TextColored(ImVec4(0.2f, 0.8f, 0.3f, 1.0f),
+                                               "active");
+                        }
+                        else
+                        {
+                            ImGui::TextColored(ImVec4(0.8f, 0.2f, 0.2f, 1.0f),
+                                               "inactive");
                         }
                     }
 
@@ -551,8 +694,10 @@ static void draw_overlay() {
         // exit button
         ImGui::Separator();
         ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.8f, 0.2f, 0.2f, 0.8f));
-        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.9f, 0.3f, 0.3f, 0.9f));
-        if (ImGui::Button("exit")) {
+        ImGui::PushStyleColor(ImGuiCol_ButtonHovered,
+                              ImVec4(0.9f, 0.3f, 0.3f, 0.9f));
+        if (ImGui::Button("exit"))
+        {
             log_msg("exit requested by user");
             PostQuitMessage(0);
         }
@@ -562,8 +707,10 @@ static void draw_overlay() {
 
     ImGui::Render();
 
-    if (enable_clear) {
-        glClearColor(clear_color.x, clear_color.y, clear_color.z, clear_color.w);
+    if (enable_clear)
+    {
+        glClearColor(
+            clear_color.x, clear_color.y, clear_color.z, clear_color.w);
         glClear(GL_COLOR_BUFFER_BIT);
     }
 
