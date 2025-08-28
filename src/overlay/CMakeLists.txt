@@ -22,8 +22,6 @@ target_link_options(
 
 target_link_libraries(bass_proxy_overlay PRIVATE imgui_opengl3 dwmapi glm)
 
-set(game_path $<TARGET_FILE_DIR:as3d2_game>)
-
 add_custom_command(
     TARGET bass_proxy_overlay
     POST_BUILD
