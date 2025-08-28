@@ -6,7 +6,7 @@ target_include_directories(bass_proxy_overlay PRIVATE ${CMAKE_CURRENT_LIST_DIR})
 
 set_target_properties(
     bass_proxy_overlay
-    PROPERTIES CXX_STANDARD 23
+    PROPERTIES CXX_STANDARD 26
                CXX_STANDARD_REQUIRED ON
                CXX_EXTENSIONS OFF
                POSITION_INDEPENDENT_CODE ON
