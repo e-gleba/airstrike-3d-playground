@@ -1,10 +1,12 @@
 #define WIN32_LEAN_AND_MEAN
+
 #include "bass_proxy.hpp"
+
 #include <GL/gl.h>
-#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <cstdarg>
+#include <cstddef>
 #include <cstdio>
 #include <imgui.h>
 #include <imgui_impl_opengl3.h>
@@ -42,7 +44,7 @@ struct hook_entry final
 static std::vector<hook_entry> g_hooks;
 
 // minimalist log buffer - based on imgui console example
-struct console_buffer
+struct console_buffer final
 {
     ImGuiTextBuffer buf;
     ImGuiTextFilter filter;
@@ -169,8 +171,8 @@ static void log_msg(const char* fmt, ...)
     const auto time_t = std::chrono::system_clock::to_time_t(now);
     const auto tm     = *std::localtime(&time_t);
 
-    char timestamp[32];
-    std::snprintf(timestamp,
+    std::array<char, 32> timestamp{};
+    std::snprintf(timestamp.data(),
                   sizeof(timestamp),
                   "[%02d:%02d:%02d] ",
                   tm.tm_hour,
@@ -183,7 +185,7 @@ static void log_msg(const char* fmt, ...)
     std::vsnprintf(buffer, sizeof(buffer), fmt, args);
     va_end(args);
 
-    console.add_log("%s%s\n", timestamp, buffer);
+    console.add_log("%s%s\n", timestamp.data(), buffer);
 }
 
 static void report_winapi_error(const char* operation, DWORD error_code)
@@ -247,9 +249,11 @@ static void init_system_info()
     MEMORYSTATUSEX ms{ sizeof(ms) };
     if (GlobalMemoryStatusEx(&ms))
     {
-        g_sysinfo.total_ram = ms.ullTotalPhys / (1024 * 1024);
+        g_sysinfo.total_ram =
+            ms.ullTotalPhys / (static_cast<DWORDLONG>(1024 * 1024));
         log_msg("total ram: %lluMB", g_sysinfo.total_ram);
-        log_msg("available ram: %lluMB", ms.ullAvailPhys / (1024 * 1024));
+        log_msg("available ram: %lluMB",
+                ms.ullAvailPhys / (static_cast<DWORDLONG>(1024 * 1024)));
         log_msg("memory load: %lu%%", ms.dwMemoryLoad);
     }
     else
