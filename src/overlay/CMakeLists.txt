@@ -1,10 +1,11 @@
 cmake_minimum_required(VERSION 3.25)
 
-add_library(bass SHARED bass_proxy.cpp bass_proxy.def dll_main.cpp)
-target_include_directories(bass PRIVATE ${CMAKE_CURRENT_LIST_DIR})
+add_library(bass_proxy_overlay SHARED bass_proxy.cpp bass_proxy.def
+                                      dll_main.cpp)
+target_include_directories(bass_proxy_overlay PRIVATE ${CMAKE_CURRENT_LIST_DIR})
 
 set_target_properties(
-    bass
+    bass_proxy_overlay
     PROPERTIES CXX_STANDARD 23
                CXX_STANDARD_REQUIRED ON
                CXX_EXTENSIONS OFF
@@ -14,35 +15,29 @@ set_target_properties(
 
 # static link so we ship no extra MinGW runtimes
 target_link_options(
-    bass
+    bass_proxy_overlay
     PRIVATE
     -static
     -s)
 
-target_link_libraries(bass PRIVATE imgui_opengl3 dwmapi glm)
+target_link_libraries(bass_proxy_overlay PRIVATE imgui_opengl3 dwmapi glm)
 
-set(game_path "${CMAKE_CURRENT_LIST_DIR}/../../2.06")
-
-add_custom_command(
-    TARGET bass
-    POST_BUILD
-    COMMAND
-        ${CMAKE_COMMAND} -E copy_if_different "$<TARGET_FILE:bass>"
-        "${game_path}/bass.dll"
-    COMMENT "deploying bass.dll to game dir = ${game_path}")
+set(game_path $<TARGET_FILE_DIR:as3d2_game>)
 
 add_custom_command(
-    TARGET bass
+    TARGET bass_proxy_overlay
     POST_BUILD
     COMMAND
         ${CMAKE_COMMAND} -E copy_if_different
-        "${CMAKE_CURRENT_LIST_DIR}/bass_real.dll" "${game_path}/bass_real.dll"
-    COMMENT "deploying bass_real.dll to game dir = ${game_path}")
-
-add_custom_command(
-    TARGET bass
-    POST_BUILD
+        "$<TARGET_FILE:bass_proxy_overlay>"
+        "$<TARGET_FILE_DIR:as3d2_game>/bass.dll"
     COMMAND
         ${CMAKE_COMMAND} -E copy_if_different
-        "${CMAKE_CURRENT_LIST_DIR}/bass_real.dll" "${game_path}/_bass_real.dll"
-    COMMENT "deploying _bass_real.dll to game dir = ${game_path}")
+        "${CMAKE_CURRENT_LIST_DIR}/bass_real.dll"
+        "$<TARGET_FILE_DIR:as3d2_game>/bass_real.dll"
+    COMMAND
+        ${CMAKE_COMMAND} -E copy_if_different
+        "${CMAKE_CURRENT_LIST_DIR}/bass_real.dll"
+        "$<TARGET_FILE_DIR:as3d2_game>/_bass_real.dll"
+    COMMENT "deploying bass proxy libs to $<TARGET_FILE_DIR:as3d2_game>"
+    VERBATIM)

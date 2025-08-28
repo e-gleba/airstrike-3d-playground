@@ -31,4 +31,5 @@ find_package(doxygen CONFIG REQUIRED)
 
 find_package(cpm CONFIG REQUIRED)
 
+add_subdirectory(2.06)
 add_subdirectory(src)
